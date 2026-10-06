@@ -10,6 +10,23 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const DAILY_TARGET_USD = 10.00;
 const PAYOUT_THRESHOLD_USD = 5.00;
 
+// Telegram Configuration from Environment Variables
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
+async function sendTelegramAlert(message) {
+    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+    try {
+        await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            chat_id: TELEGRAM_CHAT_ID,
+            text: message,
+            parse_mode: 'Markdown'
+        });
+    } catch (err) {
+        console.error(`⚠️️ [Telegram Error]:`, err.message);
+    }
+}
+
 let connectionConfig;
 if (REDIS_URL.startsWith('rediss://') || REDIS_URL.startsWith('redis://')) {
     connectionConfig = REDIS_URL;
@@ -62,7 +79,7 @@ function logSystemPerformance() {
 
     console.log(`\n📊 [SYSTEM TELEMETRY] --------------------------`);
     console.log(`   RAM Used: ${(usedMem / 1024 / 1024).toFixed(1)} MB / ${(totalMem / 1024 / 1024).toFixed(1)} MB (${memUsagePercent}%)`);
-    console.log(`   CPU Load (1m/5m/15m): ${cpuLoad[0].toFixed(2)}, ${cpuLoad[1].toFixed(2)}, ${cpuLoad[2].toFixed(2)}`);
+    console.log(`   CPU Load (1m/5m/15m): ${cpuLoad[0].toFixed(2)}, ${cpuLoad[1].toFixed(2)},${cpuLoad[2].toFixed(2)}`);
     console.log(`   Process Uptime: ${(process.uptime() / 60).toFixed(1)} minutes`);
     console.log(`--------------------------------------------------\n`);
 }
@@ -70,7 +87,7 @@ setInterval(logSystemPerformance, 120000);
 
 const taskQueue = new Queue('cluster-task-queue', { connection: connectionConfig });
 
-// Direct Internal Multi-Source Radar Producer Loop (Bypasses Localhost HTTP Bottlenecks)
+// Direct Internal Multi-Source Radar Producer Loop
 async function runProducer() {
     const feedTypes = ['alpha', 'travel', 'brokerage'];
     const selectedType = feedTypes[Math.floor(Math.random() * feedTypes.length)];
@@ -125,10 +142,10 @@ async function runProducer() {
         console.log(`📥 [Radar - ${task.sourceName}] Ingested Task ${task.id} ($${task.bountyUSD})`);
 
     } catch (err) {
-        console.error(`⚠️️ [Producer Error]:`, err.message);
+        console.error(`⚠️ [Producer Error]:`, err.message);
     }
 
-    setTimeout(runProducer, 15000); // Poll next cycle in 15 seconds
+    setTimeout(runProducer, 15000);
 }
 runProducer();
 
@@ -148,17 +165,21 @@ const worker = new Worker('cluster-task-queue', async (job) => {
     unsettledBalanceUSD += bounty;
 
     const progress = ((sessionTotalEarningsUSD / DAILY_TARGET_USD) * 100).toFixed(1);
-    console.log(`💰 [LEDGER] Earned: +$${bounty.toFixed(2)} | Total: $${sessionTotalEarningsUSD.toFixed(2)} / $${DAILY_TARGET_USD.toFixed(2)} (${progress}%)`);
+    console.log(`💰 [LEDGER] Earned: +$${bounty.toFixed(2)} \vert{} Total:$${sessionTotalEarningsUSD.toFixed(2)} /$${DAILY_TARGET_USD.toFixed(2)} (${progress}%)`);
 
     if (unsettledBalanceUSD >= PAYOUT_THRESHOLD_USD) {
         try {
             console.log(`🚀 Threshold reached ($${unsettledBalanceUSD.toFixed(2)}). Triggering Paystack transfer...`);
             
             const transfer = await disburseToPaystack(unsettledBalanceUSD);
-            console.log(`✅ [PAYSTACK] Ref: ${transfer.data.reference} | Status: ${transfer.data.status}`);
+            console.log(`✅ [PAYSTACK] Ref: ${transfer.data.reference} \vert{} Status:${transfer.data.status}`);
+            
+            await sendTelegramAlert(`✅ *Payout Triggered!*\nAmount: \$$${unsettledBalanceUSD.toFixed(2)}\nRef: \`${transfer.data.reference}\``);
+            
             unsettledBalanceUSD = 0;
         } catch (payoutErr) {
             console.error(`❌ [PAYSTACK ERROR]:`, payoutErr.message);
+            await sendTelegramAlert(`❌ *Payout Failed!*\nError: \`${payoutErr.message}\``);
         }
     }
 }, { connection: connectionConfig, concurrency: 3 });
