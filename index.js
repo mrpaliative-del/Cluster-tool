@@ -23,7 +23,7 @@ async function sendTelegramAlert(message) {
             parse_mode: 'Markdown'
         });
     } catch (err) {
-        console.error(`⚠️️ [Telegram Error]:`, err.message);
+        console.error(`⚠️ [Telegram Error]:`, err.message);
     }
 }
 
@@ -87,9 +87,9 @@ setInterval(logSystemPerformance, 120000);
 
 const taskQueue = new Queue('cluster-task-queue', { connection: connectionConfig });
 
-// Direct Internal Multi-Source Radar Producer Loop
+// Expanded Unending Multi-Source Radar Producer Loop
 async function runProducer() {
-    const feedTypes = ['alpha', 'travel', 'brokerage'];
+    const feedTypes = ['alpha', 'travel', 'brokerage', 'seo_audit', 'transit_route'];
     const selectedType = feedTypes[Math.floor(Math.random() * feedTypes.length)];
 
     try {
@@ -120,12 +120,38 @@ async function runProducer() {
                 bountyUSD: totalBounty,
                 payload: JSON.stringify({ category: 'api_brokerage', service: 'Sentiment-Analysis-Proxy', endpoint: proxiedUrl })
             };
+        } else if (selectedType === 'seo_audit') {
+            const seoId = `seo-${Date.now()}-${taskCounter++}`;
+            const targetPages = ['/pricing', '/features', '/docs/api', '/solutions/travel', '/enterprise'];
+            const randomPage = targetPages[Math.floor(Math.random() * targetPages.length)];
+            
+            task = {
+                id: seoId,
+                sourceName: 'SEO-Optimizer-Feed',
+                bountyUSD: 0.85,
+                payload: JSON.stringify({ category: 'seo_audit', targetUrl: `https://cluster-tool.onrender.com${randomPage}`, action: 'meta_tag_injection' })
+            };
+        } else if (selectedType === 'transit_route') {
+            const transitId = `transit-${Date.now()}-${taskCounter++}`;
+            const corridors = [
+                { from: 'Ogere', to: 'Jos', rate: 1.75 },
+                { from: 'Lagos', to: 'Abuja', rate: 2.00 },
+                { from: 'Ibadan', to: 'Kano', rate: 1.60 }
+            ];
+            const selectedCorridor = corridors[Math.floor(Math.random() * corridors.length)];
+
+            task = {
+                id: transitId,
+                sourceName: 'Logistics-Transit-Feed',
+                bountyUSD: selectedCorridor.rate,
+                payload: JSON.stringify({ category: 'transit_route', corridor: `${selectedCorridor.from}-to-${selectedCorridor.to}`, mode: 'interstate_express' })
+            };
         } else {
             task = {
                 id: `alpha-${taskCounter++}`,
                 sourceName: 'AlphaTask-Network',
                 bountyUSD: 1.00,
-                payload: JSON.stringify({ category: 'sentiment', score: '0.95' })
+                payload: JSON.stringify({ category: 'sentiment', score: (Math.random() * (0.99 - 0.80) + 0.80).toFixed(2) })
             };
         }
 
@@ -145,7 +171,7 @@ async function runProducer() {
         console.error(`⚠️ [Producer Error]:`, err.message);
     }
 
-    setTimeout(runProducer, 15000);
+    setTimeout(runProducer, 15000); // Continuous loop every 15 seconds
 }
 runProducer();
 
@@ -174,7 +200,7 @@ const worker = new Worker('cluster-task-queue', async (job) => {
             const transfer = await disburseToPaystack(unsettledBalanceUSD);
             console.log(`✅ [PAYSTACK] Ref: ${transfer.data.reference} \vert{} Status:${transfer.data.status}`);
             
-            await sendTelegramAlert(`✅ *Payout Triggered!*\nAmount: \$$${unsettledBalanceUSD.toFixed(2)}\nRef: \`${transfer.data.reference}\``);
+            await sendTelegramAlert(`✅ *Payout Triggered!*\nAmount: \$${unsettledBalanceUSD.toFixed(2)}\nRef: \`${transfer.data.reference}\``);
             
             unsettledBalanceUSD = 0;
         } catch (payoutErr) {
