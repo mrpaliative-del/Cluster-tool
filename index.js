@@ -21,6 +21,15 @@ app.use(express.json());
 
 let taskCounter = 1;
 
+// Enhanced Health Check Endpoint for Render Monitoring
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'healthy',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+    });
+});
+
 app.get('/v1/sources/alpha-feed', (req, res) => {
     res.json({
         sourceName: 'AlphaTask-Network',
@@ -48,7 +57,15 @@ async function runProducer() {
 
         for (const task of tasks) {
             task.sourceName = response.data.sourceName;
-            await taskQueue.add('process-task', task, { jobId: task.id, removeOnComplete: true });
+            await taskQueue.add('process-task', task, { 
+                jobId: task.id, 
+                removeOnComplete: true,
+                attempts: 3,
+                backoff: {
+                    type: 'exponential',
+                    delay: 10000 // Intelligent retry backoff starting at 10s
+                }
+            });
             console.log(`📥 [Producer] Ingested Task ${task.id} ($${task.bountyUSD})`);
         }
     } catch (err) {}
@@ -80,6 +97,8 @@ const worker = new Worker('cluster-task-queue', async (job) => {
     if (unsettledBalanceUSD >= PAYOUT_THRESHOLD_USD) {
         try {
             console.log(`🚀 Threshold reached ($${unsettledBalanceUSD.toFixed(2)}). Triggering Paystack transfer...`);
+            
+            // Pass unique idempotency reference internally through your service if needed
             const transfer = await disburseToPaystack(unsettledBalanceUSD);
             console.log(`✅ [PAYSTACK] Ref: ${transfer.data.reference} | Status: ${transfer.data.status}`);
             unsettledBalanceUSD = 0;
