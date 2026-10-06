@@ -31,56 +31,6 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Original Alpha Feed
-app.get('/v1/sources/alpha-feed', (req, res) => {
-    res.json({
-        sourceName: 'AlphaTask-Network',
-        tasks: [
-            { id: `alpha-${taskCounter++}`, bountyUSD: 1.00, payload: '{"category": "sentiment", "score": "0.95"}' },
-            { id: `alpha-${taskCounter++}`, bountyUSD: 1.50, payload: '{"category": "entity_tag", "verified": true}' }
-        ]
-    });
-});
-
-// New Revenue Module 1: Travel & Route Spreads (Travelpayouts Integration)
-app.get('/v1/sources/travel-feed', (req, res) => {
-    const travelId = `travel-${Date.now()}-${taskCounter++}`;
-    const rawUrl = 'https://jetradar.com/search?from=LOS&to=JOS';
-    const affiliateMarker = 'mpee_travel_01';
-    const optimizedDeepLink = `${rawUrl}&marker=${affiliateMarker}&ura=true`;
-
-    res.json({
-        sourceName: 'TravelMatrix-Feed',
-        tasks: [
-            { 
-                id: travelId, 
-                bountyUSD: 1.50, 
-                payload: JSON.stringify({ category: 'travel_route', route: 'LOS-JOS', monetizedUrl: optimizedDeepLink }) 
-            }
-        ]
-    });
-});
-
-// New Revenue Module 2: API & Data Micro-Brokerage
-app.get('/v1/sources/api-broker-feed', (req, res) => {
-    const brokerId = `broker-${Date.now()}-${taskCounter++}`;
-    const baseCostUSD = 0.50;
-    const markupUSD = 0.30;
-    const totalBounty = baseCostUSD + markupUSD;
-    const proxiedUrl = 'https://api.external-provider.com/v1/analyze?proxied=true&margin=0.3';
-
-    res.json({
-        sourceName: 'RapidAPI-Broker-Feed',
-        tasks: [
-            { 
-                id: brokerId, 
-                bountyUSD: totalBounty, 
-                payload: JSON.stringify({ category: 'api_brokerage', service: 'Sentiment-Analysis-Proxy', endpoint: proxiedUrl }) 
-            }
-        ]
-    });
-});
-
 app.post('/v1/tasks/submit', (req, res) => {
     res.status(200).json({ status: "success", creditedUSD: req.body.bountyUSD });
 });
@@ -107,38 +57,65 @@ setInterval(logSystemPerformance, 120000);
 
 const taskQueue = new Queue('cluster-task-queue', { connection: connectionConfig });
 
-// Multi-Source Radar Producer Loop
+// Direct Internal Multi-Source Radar Producer Loop (Bypasses Localhost HTTP Bottlenecks)
 async function runProducer() {
-    const endpoints = [
-        '/v1/sources/alpha-feed',
-        '/v1/sources/travel-feed',
-        '/v1/sources/api-broker-feed'
-    ];
+    const feedTypes = ['alpha', 'travel', 'brokerage'];
+    const selectedType = feedTypes[Math.floor(Math.random() * feedTypes.length)];
 
-    for (const endpoint of endpoints) {
-        try {
-            const response = await axios.get(`http://localhost:${PORT}${endpoint}`, { timeout: 3000 });
-            const tasks = response.data.tasks || [];
+    try {
+        let task;
 
-            for (const task of tasks) {
-                task.sourceName = response.data.sourceName;
-                await taskQueue.add('process-task', task, { 
-                    jobId: task.id, 
-                    removeOnComplete: true,
-                    attempts: 3,
-                    backoff: {
-                        type: 'exponential',
-                        delay: 10000 // Intelligent retry backoff starting at 10s
-                    }
-                });
-                console.log(`📥 [Radar - ${response.data.sourceName}] Ingested Task ${task.id} ($${task.bountyUSD})`);
-            }
-        } catch (err) {
-            // Silently catch network hiccups on self-polling endpoints to keep loop resilient
+        if (selectedType === 'travel') {
+            const travelId = `travel-${Date.now()}-${taskCounter++}`;
+            const rawUrl = 'https://jetradar.com/search?from=LOS&to=JOS';
+            const affiliateMarker = 'mpee_travel_01';
+            const optimizedDeepLink = `${rawUrl}&marker=${affiliateMarker}&ura=true`;
+
+            task = {
+                id: travelId,
+                sourceName: 'TravelMatrix-Feed',
+                bountyUSD: 1.50,
+                payload: JSON.stringify({ category: 'travel_route', route: 'LOS-JOS', monetizedUrl: optimizedDeepLink })
+            };
+        } else if (selectedType === 'brokerage') {
+            const brokerId = `broker-${Date.now()}-${taskCounter++}`;
+            const baseCostUSD = 0.50;
+            const markupUSD = 0.30;
+            const totalBounty = baseCostUSD + markupUSD;
+            const proxiedUrl = 'https://api.external-provider.com/v1/analyze?proxied=true&margin=0.3';
+
+            task = {
+                id: brokerId,
+                sourceName: 'RapidAPI-Broker-Feed',
+                bountyUSD: totalBounty,
+                payload: JSON.stringify({ category: 'api_brokerage', service: 'Sentiment-Analysis-Proxy', endpoint: proxiedUrl })
+            };
+        } else {
+            task = {
+                id: `alpha-${taskCounter++}`,
+                sourceName: 'AlphaTask-Network',
+                bountyUSD: 1.00,
+                payload: JSON.stringify({ category: 'sentiment', score: '0.95' })
+            };
         }
+
+        await taskQueue.add('process-task', task, { 
+            jobId: task.id, 
+            removeOnComplete: true,
+            attempts: 3,
+            backoff: {
+                type: 'exponential',
+                delay: 10000
+            }
+        });
+        
+        console.log(`📥 [Radar - ${task.sourceName}] Ingested Task ${task.id} ($${task.bountyUSD})`);
+
+    } catch (err) {
+        console.error(`⚠️ [Producer Error]:`, err.message);
     }
 
-    setTimeout(runProducer, 15000); // Poll feeds every 15 seconds
+    setTimeout(runProducer, 15000); // Poll next cycle in 15 seconds
 }
 runProducer();
 
