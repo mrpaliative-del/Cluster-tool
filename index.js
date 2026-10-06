@@ -1,6 +1,7 @@
 const express = require('express');
 const { Queue, Worker } = require('bullmq');
 const axios = require('axios');
+const os = require('os'); // Google Colab-style system telemetry module
 const { resolvePayload } = require('./resolver');
 const { disburseToPaystack } = require('./paystackService');
 
@@ -47,6 +48,22 @@ app.post('/v1/tasks/submit', (req, res) => {
 app.listen(PORT, () => {
     console.log(`🌐 Unified Gateway & Cluster running on port ${PORT}`);
 });
+
+// Colab-Style System Telemetry Monitor (Logs resource metrics every 2 minutes)
+function logSystemPerformance() {
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+    const memUsagePercent = ((usedMem / totalMem) * 100).toFixed(1);
+    const cpuLoad = os.loadavg();
+
+    console.log(`\n📊 [SYSTEM TELEMETRY] --------------------------`);
+    console.log(`   RAM Used: ${(usedMem / 1024 / 1024).toFixed(1)} MB / ${(totalMem / 1024 / 1024).toFixed(1)} MB (${memUsagePercent}%)`);
+    console.log(`   CPU Load (1m/5m/15m): ${cpuLoad[0].toFixed(2)}, ${cpuLoad[1].toFixed(2)}, ${cpuLoad[2].toFixed(2)}`);
+    console.log(`   Process Uptime: ${(process.uptime() / 60).toFixed(1)} minutes`);
+    console.log(`--------------------------------------------------\n`);
+}
+setInterval(logSystemPerformance, 120000);
 
 const taskQueue = new Queue('cluster-task-queue', { connection: connectionConfig });
 
@@ -98,7 +115,6 @@ const worker = new Worker('cluster-task-queue', async (job) => {
         try {
             console.log(`🚀 Threshold reached ($${unsettledBalanceUSD.toFixed(2)}). Triggering Paystack transfer...`);
             
-            // Pass unique idempotency reference internally through your service if needed
             const transfer = await disburseToPaystack(unsettledBalanceUSD);
             console.log(`✅ [PAYSTACK] Ref: ${transfer.data.reference} | Status: ${transfer.data.status}`);
             unsettledBalanceUSD = 0;
