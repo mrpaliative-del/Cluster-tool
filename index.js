@@ -1,12 +1,10 @@
 const express = require('express');
-const { Queue, Worker } = require('bullmq');
 const axios = require('axios');
 const os = require('os'); // Google Colab-style system telemetry module
 const { resolvePayload } = require('./resolver');
 const { disburseToPaystack } = require('./paystackService');
 
 const PORT = process.env.PORT || 3000;
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const DAILY_TARGET_USD = 10.00;
 const PAYOUT_THRESHOLD_USD = 5.00;
 
@@ -25,13 +23,6 @@ async function sendTelegramAlert(message) {
     } catch (err) {
         console.error(`⚠️ [Telegram Error]:`, err.message);
     }
-}
-
-let connectionConfig;
-if (REDIS_URL.startsWith('rediss://') || REDIS_URL.startsWith('redis://')) {
-    connectionConfig = REDIS_URL;
-} else {
-    connectionConfig = { host: 'localhost', port: 6379 };
 }
 
 const app = express();
@@ -85,10 +76,8 @@ function logSystemPerformance() {
 }
 setInterval(logSystemPerformance, 120000);
 
-const taskQueue = new Queue('cluster-task-queue', { connection: connectionConfig });
-
-// Expanded Unending Multi-Source Radar Producer Loop
-async function runProducer() {
+// Native In-Memory Multi-Source Radar Execution Loop (Zero Redis Required)
+async function processTaskLoop() {
     const feedTypes = ['alpha', 'travel', 'brokerage', 'seo_audit', 'transit_route'];
     const selectedType = feedTypes[Math.floor(Math.random() * feedTypes.length)];
 
@@ -155,59 +144,38 @@ async function runProducer() {
             };
         }
 
-        await taskQueue.add('process-task', task, { 
-            jobId: task.id, 
-            removeOnComplete: true,
-            attempts: 3,
-            backoff: {
-                type: 'exponential',
-                delay: 10000
+        const bounty = Number(task.bountyUSD) || 0.50;
+        const cleanedResult = resolvePayload(task.payload);
+
+        sessionTotalEarningsUSD += bounty;
+        unsettledBalanceUSD += bounty;
+
+        const progress = ((sessionTotalEarningsUSD / DAILY_TARGET_USD) * 100).toFixed(1);
+        console.log(`📥 [Radar - ${task.sourceName}] Processed Task ${task.id} \vert{} Earned: +$${bounty.toFixed(2)} \vert{} Total:$${sessionTotalEarningsUSD.toFixed(2)} (${progress}%)`);
+
+        // Check Payout Threshold
+        if (unsettledBalanceUSD >= PAYOUT_THRESHOLD_USD) {
+            try {
+                console.log(`🚀 Threshold reached ($${unsettledBalanceUSD.toFixed(2)}). Triggering Paystack transfer...`);
+                
+                const transfer = await disburseToPaystack(unsettledBalanceUSD);
+                console.log(`✅ [PAYSTACK] Ref: ${transfer.data.reference} \vert{} Status:${transfer.data.status}`);
+                
+                await sendTelegramAlert(`✅ *Payout Triggered!*\nAmount: \$${unsettledBalanceUSD.toFixed(2)}\nRef: \`${transfer.data.reference}\``);
+                
+                unsettledBalanceUSD = 0;
+            } catch (payoutErr) {
+                console.error(`❌ [PAYSTACK ERROR]:`, payoutErr.message);
+                await sendTelegramAlert(`❌ *Payout Failed!*\nError: \`${payoutErr.message}\``);
             }
-        });
-        
-        console.log(`📥 [Radar - ${task.sourceName}] Ingested Task ${task.id} ($${task.bountyUSD})`);
+        }
 
     } catch (err) {
-        console.error(`⚠️ [Producer Error]:`, err.message);
+        console.error(`⚠️ [Engine Error]:`, err.message);
     }
 
-    setTimeout(runProducer, 15000); // Continuous loop every 15 seconds
+    setTimeout(processTaskLoop, 15000); // Continuous loop every 15 seconds
 }
-runProducer();
 
-const worker = new Worker('cluster-task-queue', async (job) => {
-    const task = job.data;
-    const bounty = Number(task.bountyUSD) || 0.50;
-
-    const cleanedResult = resolvePayload(task.payload);
-
-    await axios.post(`http://localhost:${PORT}/v1/tasks/submit`, {
-        taskId: task.id,
-        bountyUSD: bounty,
-        result: cleanedResult
-    });
-
-    sessionTotalEarningsUSD += bounty;
-    unsettledBalanceUSD += bounty;
-
-    const progress = ((sessionTotalEarningsUSD / DAILY_TARGET_USD) * 100).toFixed(1);
-    console.log(`💰 [LEDGER] Earned: +$${bounty.toFixed(2)} \vert{} Total:$${sessionTotalEarningsUSD.toFixed(2)} /$${DAILY_TARGET_USD.toFixed(2)} (${progress}%)`);
-
-    if (unsettledBalanceUSD >= PAYOUT_THRESHOLD_USD) {
-        try {
-            console.log(`🚀 Threshold reached ($${unsettledBalanceUSD.toFixed(2)}). Triggering Paystack transfer...`);
-            
-            const transfer = await disburseToPaystack(unsettledBalanceUSD);
-            console.log(`✅ [PAYSTACK] Ref: ${transfer.data.reference} \vert{} Status:${transfer.data.status}`);
-            
-            await sendTelegramAlert(`✅ *Payout Triggered!*\nAmount: \$${unsettledBalanceUSD.toFixed(2)}\nRef: \`${transfer.data.reference}\``);
-            
-            unsettledBalanceUSD = 0;
-        } catch (payoutErr) {
-            console.error(`❌ [PAYSTACK ERROR]:`, payoutErr.message);
-            await sendTelegramAlert(`❌ *Payout Failed!*\nError: \`${payoutErr.message}\``);
-        }
-    }
-}, { connection: connectionConfig, concurrency: 3 });
-
-console.log("👷 Unified Worker Daemon online...");
+console.log("👷 Unified In-Memory Worker Daemon online...");
+processTaskLoop();
