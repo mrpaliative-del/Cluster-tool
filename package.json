@@ -4,7 +4,7 @@
   "description": "Production micro-task automation daemon with Paystack settlement",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node create-recipient.js"
   },
   "dependencies": {
     "axios": "^1.6.0",
