@@ -21,6 +21,8 @@ const app = express();
 app.use(express.json());
 
 let taskCounter = 1;
+let sessionTotalEarningsUSD = 0;
+let unsettledBalanceUSD = 0;
 
 // Enhanced Health Check Endpoint for Render Monitoring
 app.get('/health', (req, res) => {
@@ -28,6 +30,17 @@ app.get('/health', (req, res) => {
         status: 'healthy',
         uptime: process.uptime(),
         timestamp: new Date().toISOString()
+    });
+});
+
+// Live Ledger Status Endpoint for On-the-Go Tracking
+app.get('/ledger', (req, res) => {
+    res.status(200).json({
+        sessionTotalEarningsUSD: Number(sessionTotalEarningsUSD.toFixed(2)),
+        unsettledBalanceUSD: Number(unsettledBalanceUSD.toFixed(2)),
+        payoutThresholdUSD: PAYOUT_THRESHOLD_USD,
+        dailyTargetUSD: DAILY_TARGET_USD,
+        progressPercent: ((sessionTotalEarningsUSD / DAILY_TARGET_USD) * 100).toFixed(1) + '%'
     });
 });
 
@@ -112,15 +125,12 @@ async function runProducer() {
         console.log(`📥 [Radar - ${task.sourceName}] Ingested Task ${task.id} ($${task.bountyUSD})`);
 
     } catch (err) {
-        console.error(`⚠️ [Producer Error]:`, err.message);
+        console.error(`⚠️️ [Producer Error]:`, err.message);
     }
 
     setTimeout(runProducer, 15000); // Poll next cycle in 15 seconds
 }
 runProducer();
-
-let sessionTotalEarningsUSD = 0;
-let unsettledBalanceUSD = 0;
 
 const worker = new Worker('cluster-task-queue', async (job) => {
     const task = job.data;
