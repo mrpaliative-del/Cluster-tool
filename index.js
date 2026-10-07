@@ -3,9 +3,9 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION GLOBAL WORKER DAEMON
  * ============================================================================
  * File: index.js
- * Version: 4.2.1-Production
- * Architecture: Hybrid Ingestion (Supabase Queue + External API) + Playwright 
- * Headless Automation + Paystack Webhook Settlement & Telegram Alerts.
+ * Version: 4.2.3-Production-Unified
+ * Architecture: Hybrid Ingestion (Supabase + BullMQ Queue + External API) + 
+ * Playwright Headless Automation + Paystack Webhook Settlement & Telegram Alerts.
  * Minimum Payout Threshold Floor: >= $0.40 USD equivalent.
  * ============================================================================
  */
@@ -15,6 +15,8 @@ const https = require('https');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { chromium } = require('playwright');
+const { Queue, Worker } = require('bullmq');
+const IORedis = require('ioredis');
 
 // ==========================================
 // 1. CONFIGURATION & ENVIRONMENT SETUP
@@ -42,6 +44,15 @@ if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
 } else {
     console.warn('⚠️ [Supabase] Missing core credentials. Database tracking bypassed.');
 }
+
+// Redis & BullMQ Setup
+const redisConnection = new IORedis({
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT, 10) || 6379,
+    maxRetriesPerRequest: null,
+});
+
+const omniQueue = new Queue('omni-task-queue', { connection: redisConnection });
 
 // Runtime Metrics Tracking for Health Dashboard
 const metrics = {
@@ -152,8 +163,8 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
         status: 'online',
-        service: 'Industrial Zero-Starvation Task Execution Engine',
-        version: '4.2.1-Production',
+        service: 'Industrial Zero-Starvation Task Execution Engine (BullMQ Integrated)',
+        version: '4.2.3-Production-Unified',
         marker: AFFILIATE_MARKER,
         supabase_connected: !!supabase,
         metrics: {
@@ -193,7 +204,7 @@ function dispatchTelegramMessage(message) {
                 'Content-Type': 'application/json',
                 'Content-Length': Buffer.byteLength(postData)
             },
-            timeout: 10000 // 10-second hard timeout to prevent hanging
+            timeout: 10000
         };
 
         const req = https.request(options, (res) => {
@@ -252,7 +263,7 @@ function sendWebhookAlert(taskId, amountNGN, reference, sector) {
 }
 
 // ==========================================
-// 4. PLAYWRIGHT HEADLESS BROWSER AUTOMATION WORKER
+// 4. PLAYWRIGHT AUTOMATION ENGINE CORE
 // ==========================================
 async function executePlaywrightAutomation(task, template) {
     console.log(`🤖 [Playwright Worker] Initializing headless daemon for: "${template.template_name}"`);
@@ -284,7 +295,6 @@ async function executePlaywrightAutomation(task, template) {
         console.log(`🌐 [Worker] Navigating to target endpoint: ${targetUrl}`);
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-        // Execute dynamic user action schema steps
         const steps = template.action_schema.steps || [];
         for (const step of steps) {
             console.log(`⚡ [Worker Step] Executing action: ${step.type} on selector: ${step.selector || 'none'}`);
@@ -297,10 +307,8 @@ async function executePlaywrightAutomation(task, template) {
             }
         }
 
-        // Enforce Minimum Payout Floor of >= $0.40
         const computedPayout = Math.max(task.payload.estimated_value || template.minimum_payout || 0.40, 0.40);
 
-        // Commit execution entry into Supabase task ledger
         if (supabase) {
             await supabase.from('task_ledger').insert({
                 template_id: template.id,
@@ -316,7 +324,7 @@ async function executePlaywrightAutomation(task, template) {
         metrics.lastActiveTimestamp = new Date().toISOString();
 
         await sendTaskAlert(task, template, computedPayout, null);
-        return true;
+        return { success: true, computedPayout };
 
     } catch (err) {
         console.error(`❌ [Playwright Worker Error]:`, err.message);
@@ -327,7 +335,7 @@ async function executePlaywrightAutomation(task, template) {
         }
 
         await dispatchTelegramMessage(`❌ *Task Automation Failure*\n\n*Template:* ${template.template_name}\n*Error:* ${err.message}`);
-        return false;
+        throw err;
 
     } finally {
         if (browser) {
@@ -338,23 +346,50 @@ async function executePlaywrightAutomation(task, template) {
 }
 
 // ==========================================
-// 5. HYBRID TEMPLATE ROUTER & QUEUE FETCHER
+// 5. BULLMQ WORKER REGISTRATION
+// ==========================================
+const omniWorker = new Worker(
+    'omni-task-queue',
+    async (job) => {
+        console.log(`📦 [BullMQ Worker] Processing job ID: ${job.id} | Name: ${job.name}`);
+        const { task, template } = job.data;
+        
+        if (!task || !template) {
+            throw new Error('Invalid job payload: missing task or template structure.');
+        }
+
+        return await executePlaywrightAutomation(task, template);
+    },
+    { 
+        connection: redisConnection, 
+        concurrency: 2 
+    }
+);
+
+omniWorker.on('failed', (job, err) => {
+    console.error(`❌ [BullMQ Worker] Job ${job?.id} permanently failed:`, err.message);
+});
+
+omniWorker.on('completed', (job) => {
+    console.log(`✨ [BullMQ Worker] Job ${job.id} successfully finished.`);
+});
+
+// ==========================================
+// 6. HYBRID TEMPLATE ROUTER & QUEUE DISPATCHER
 // ==========================================
 async function fetchAndRouteNextTask() {
-    if (!supabase) return null;
+    if (!supabase) return false;
 
     try {
-        // 1. Fetch all active locked templates from Supabase
         const { data: templates, error: tError } = await supabase
             .from('locked_task_templates')
             .select('*')
             .eq('is_active', true);
 
         if (tError || !templates || templates.length === 0) {
-            return null;
+            return false;
         }
 
-        // 2. Fetch next unprocessed pending task from queue
         const { data: taskData, error: qError } = await supabase
             .from('pending_tasks')
             .select('*')
@@ -364,10 +399,9 @@ async function fetchAndRouteNextTask() {
             .single();
 
         if (qError || !taskData) {
-            return null;
+            return false;
         }
 
-        // 3. Match incoming task against locked template triggers and payout threshold
         const matchedTemplate = templates.find(t => {
             const matchesKeyword = (taskData.sector && taskData.sector.toLowerCase().includes(t.keyword_trigger.toLowerCase())) ||
                                    (taskData.target_asset && taskData.target_asset.toLowerCase().includes(t.keyword_trigger.toLowerCase()));
@@ -376,7 +410,6 @@ async function fetchAndRouteNextTask() {
         });
 
         if (matchedTemplate) {
-            // Apply atomic row lock to prevent race conditions across distributed workers
             const { error: lockError } = await supabase
                 .from('pending_tasks')
                 .update({ status: 'processing', worker_marker: AFFILIATE_MARKER })
@@ -384,8 +417,9 @@ async function fetchAndRouteNextTask() {
                 .eq('status', 'pending');
 
             if (!lockError) {
-                console.log(`🎯 [Router Match] Task ID [${taskData.id}] successfully routed to template: "${matchedTemplate.template_name}"`);
-                return {
+                console.log(`🎯 [Router Match] Task ID [${taskData.id}] matched template: "${matchedTemplate.template_name}". Enqueuing to BullMQ...`);
+                
+                await omniQueue.add('execute-omni-task', {
                     task: {
                         id: taskData.id,
                         sector: taskData.sector,
@@ -396,33 +430,31 @@ async function fetchAndRouteNextTask() {
                         }
                     },
                     template: matchedTemplate
-                };
+                });
+
+                return true;
             }
         }
     } catch (err) {
-        // Silent recovery on empty queue or transient network disconnects
+        // Silent recovery on empty queue or transient dispatches
     }
 
-    return null;
+    return false;
 }
 
 // ==========================================
-// 6. INDUSTRIAL AUTONOMOUS DAEMON ENGINE LOOP
+// 7. INDUSTRIAL AUTONOMOUS DAEMON ENGINE LOOP
 // ==========================================
 async function startAutonomousDaemon() {
-    console.log("🚀 [Daemon] Initializing Zero-Starvation Global Execution Loop...");
+    console.log("🚀 [Daemon] Initializing Zero-Starvation Global Execution Loop with BullMQ...");
     console.log(`⚙️ [Config] Polling cadence: ${POLL_INTERVAL_MS}ms | Affiliate Marker: ${AFFILIATE_MARKER}`);
 
     while (true) {
         try {
             metrics.totalCyclesExecuted++;
-            const routedPackage = await fetchAndRouteNextTask();
+            const dispatched = await fetchAndRouteNextTask();
 
-            if (routedPackage && routedPackage.task && routedPackage.template) {
-                console.log(`\n--- Execution Cycle #${metrics.totalCyclesExecuted} [Matched: ${routedPackage.template.template_name}] ---`);
-                await executePlaywrightAutomation(routedPackage.task, routedPackage.template);
-            } else {
-                // Heartbeat indicator for idle polling cycles
+            if (!dispatched) {
                 process.stdout.write('.');
             }
         } catch (daemonErr) {
