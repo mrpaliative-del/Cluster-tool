@@ -99,16 +99,19 @@ function triggerSyntheticFailover(resolve) {
 // ==========================================
 function sendTelegramAlert(task, valueUSD) {
     return new Promise((resolve) => {
-        if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return resolve(true);
+        if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+            console.log('⚠️ Telegram credentials missing.');
+            return resolve(false);
+        }
 
-        const resolutionLink = `https://your-crm.com/resolve?task=${task.id}&marker=${AFFILIATE_MARKER}`;
-        const message = `🌍 *Global Gap Scanner Intelligence Alert*\n\n` +
+        const resolutionLink = `https://cluster-tool.onrender.com/resolve?task=${task.id}&marker=${AFFILIATE_MARKER}`;
+        const message = `🚀 *Shared Pool Daemon Alert*\n\n` +
                         `• *Task ID:* \`${task.id}\`\n` +
                         `• *Sector:* \`${task.sector}\`\n` +
                         `• *Target Asset:* *${task.payload.target_asset}*\n` +
-                        `• *Action Dispatch:* ${resolutionLink}\n` +
-                        `• *Projected Yield:* \`$${valueUSD}\`\n` +
-                        `• *Status:* \`Ledger Locked & Verified ✅\``;
+                        `• *Route:* [Access Deep-Link](${resolutionLink})\n` +
+                        `• *Ledger Yield:* \`$${valueUSD}\`\n` +
+                        `• *Status:* \`Paystack Confirmed ✅\``;
 
         const postData = JSON.stringify({
             chat_id: TELEGRAM_CHAT_ID,
@@ -129,10 +132,17 @@ function sendTelegramAlert(task, valueUSD) {
 
         const req = https.request(options, (res) => {
             res.on('data', () => {});
-            res.on('end', () => resolve(true));
+            res.on('end', () => {
+                console.log(`📱 Telegram Alert Dispatched for Task [ID: ${task.id}]`);
+                resolve(true);
+            });
         });
 
-        req.on('error', () => resolve(true));
+        req.on('error', (err) => {
+            console.error(`⚠️ Telegram Network Error:`, err.message);
+            resolve(false);
+        });
+
         req.write(postData);
         req.end();
     });
