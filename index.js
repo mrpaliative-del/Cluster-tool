@@ -547,6 +547,34 @@ async function ingestExternalLeads() {
 
 // Run ingestion sync every 2 minutes
 setInterval(ingestExternalLeads, 120000);
+// ==========================================
+// 7. BACKGROUND DAEMON POLLING LOOP
+// ==========================================
+const POLLING_INTERVAL_MS = 5000; // Check for pending tasks every 5 seconds
+let isPollingActive = false;
+
+async function startTaskDaemon() {
+    if (isPollingActive) return;
+    isPollingActive = true;
+
+    console.log(`🚀 [Daemon] Background task polling loop started (Interval: ${POLLING_INTERVAL_MS}ms)`);
+
+    setInterval(async () => {
+        try {
+            // Attempt to fetch and route the next pending task
+            const processed = await fetchAndRouteNextTask();
+            if (processed) {
+                // If a task was processed, immediately look for another one without waiting for the full interval
+                setImmediate(fetchAndRouteNextTask);
+            }
+        } catch (err) {
+            console.error('⚠️ [Daemon Error in Polling Loop]:', err.message);
+        }
+    }, POLLING_INTERVAL_MS);
+}
+
+// Start the daemon once the server and database connections are verified
+startTaskDaemon();
 
 
 startAutonomousDaemon();
