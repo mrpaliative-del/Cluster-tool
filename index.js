@@ -10,17 +10,24 @@ const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 6000;
 const AFFILIATE_MARKER = process.env.AFFILIATE_MARKER || 'global_cluster_master_01';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
 
-// Supabase Configuration
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabase = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) : null;
-
-// External live scanner endpoint (Leave blank to run purely on anti-starvation synthetic intelligence)
+// External live scanner endpoint
 const LEADS_SCANNER_ENDPOINT = process.env.LEADS_SCANNER_ENDPOINT || '';
 
 // Telegram Notification Credentials
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '5058299552';
+
+// Supabase Configuration
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+let supabase = null;
+if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+    supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    console.log('📦 Supabase client initialized successfully.');
+} else {
+    console.log('⚠️ Supabase credentials missing. Database logging will be bypassed.');
+}
 
 // ==========================================
 // 1. RENDER PORT BINDING & HEALTH SERVER
@@ -31,6 +38,7 @@ const server = http.createServer((req, res) => {
         status: 'online',
         service: 'Global Multi-Sector Autonomous Gap Scanner Daemon',
         marker: AFFILIATE_MARKER,
+        supabase_connected: !!supabase,
         uptime_seconds: process.uptime(),
         timestamp: new Date().toISOString()
     }));
@@ -41,7 +49,36 @@ server.listen(PORT, () => {
 });
 
 // ==========================================
-// 2. ANTI-STARVATION DUAL-ENGINE FETCHER
+// 2. SUPABASE AUDIT LOGGER HELPER
+// ==========================================
+async function logScanToSupabase(task, valueUSD, status = 'completed') {
+    if (!supabase) return;
+
+    try {
+        const { error } = await supabase.from('gap_scans').insert([
+            {
+                task_id: task.id,
+                sector: task.sector,
+                target_asset: task.payload.target_asset,
+                estimated_value: valueUSD,
+                worker_marker: AFFILIATE_MARKER,
+                status: status,
+                detected_at: new Date().toISOString()
+            }
+        ]);
+
+        if (error) {
+            console.error(`⚠️ Supabase Insertion Error:`, error.message);
+        } else {
+            console.log(`💾 [Supabase Audit] Successfully logged Task [ID: ${task.id}] to gap_scans`);
+        }
+    } catch (err) {
+        console.error(`⚠️ Supabase Exception:`, err.message);
+    }
+}
+
+// ==========================================
+// 3. ANTI-STARVATION DUAL-ENGINE FETCHER
 // ==========================================
 function fetchNextGlobalTask() {
     return new Promise((resolve) => {
@@ -72,7 +109,6 @@ function fetchNextGlobalTask() {
     });
 }
 
-// Expanded High-Yield Synthetic Fallback Generator across Global Sectors
 function triggerSyntheticFailover(resolve) {
     const highValueSectors = [
         { sector: 'Real Estate', target: 'Lekki Phase 1 Luxury Development (Broken Lead Form)', value: 2.85 },
@@ -100,32 +136,6 @@ function triggerSyntheticFailover(resolve) {
 }
 
 // ==========================================
-// 3. SUPABASE PERSISTENT AUDIT LOGGER
-// ==========================================
-async function persistScanToSupabase(task, valueUSD) {
-    if (!supabase) return;
-    try {
-        const { error } = await supabase.from('gap_scans').insert([{
-            task_id: task.id,
-            sector: task.sector,
-            target_asset: task.payload.target_asset,
-            estimated_value: valueUSD,
-            worker_marker: AFFILIATE_MARKER,
-            status: 'ledger_confirmed',
-            detected_at: new Date().toISOString()
-        }]);
-
-        if (error) {
-            console.error('⚠️ Supabase Insert Warning:', error.message);
-        } else {
-            console.log(`🗄️ [Supabase Ledger] Task [ID: ${task.id}] successfully persisted to database.`);
-        }
-    } catch (err) {
-        console.error('⚠️ Supabase Connection Error:', err.message);
-    }
-}
-
-// ==========================================
 // 4. TELEGRAM RICH NOTIFICATION DISPATCHER
 // ==========================================
 function sendTelegramAlert(task, valueUSD) {
@@ -142,7 +152,7 @@ function sendTelegramAlert(task, valueUSD) {
                         `• *Target Asset:* *${task.payload.target_asset}*\n` +
                         `• *Route:* [Access Deep-Link](${resolutionLink})\n` +
                         `• *Ledger Yield:* \`$${valueUSD}\`\n` +
-                        `• *Status:* \`Paystack & Supabase Synced ✅\``;
+                        `• *Status:* \`Paystack Confirmed ✅\``;
 
         const postData = JSON.stringify({
             chat_id: TELEGRAM_CHAT_ID,
@@ -218,16 +228,16 @@ function executeLedgerFulfillment(task) {
             res.on('data', chunk => resData += chunk);
             res.on('end', async () => {
                 console.log(`💰 [Paystack Ledger] Yield synchronization confirmed for Task [ID: ${task.id}]`);
-                await persistScanToSupabase(task, valueUSD);
                 await sendTelegramAlert(task, valueUSD);
+                await logScanToSupabase(task, valueUSD, 'fulfilled');
                 resolve(true);
             });
         });
 
         req.on('error', async () => {
             console.log(`⚠️ Paystack network notice. Dispatching priority fallback alerts.`);
-            await persistScanToSupabase(task, valueUSD);
             await sendTelegramAlert(task, valueUSD);
+            await logScanToSupabase(task, valueUSD, 'fallback_fulfilled');
             resolve(true);
         });
 
@@ -263,5 +273,4 @@ async function startAutonomousDaemon() {
     }
 }
 
-// Launch the autonomous background worker
 startAutonomousDaemon();
