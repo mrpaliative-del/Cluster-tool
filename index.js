@@ -467,3 +467,50 @@ async function startAutonomousDaemon() {
 
 // Initialize the master background execution daemon
 startAutonomousDaemon();
+// ==========================================
+// 8. EXTERNAL LEADS SCANNER & INGESTION
+// ==========================================
+async function ingestExternalLeads() {
+    if (!LEADS_SCANNER_ENDPOINT || !supabase) return;
+
+    try {
+        console.log('🔄 [Ingestion] Polling external lead scanner endpoint...');
+        const response = await fetch(LEADS_SCANNER_ENDPOINT, {
+            headers: { 'Authorization': `Bearer ${process.env.SCANNER_API_KEY || ''}` }
+        });
+        
+        if (!response.ok) return;
+        const leads = await response.json();
+
+        for (const lead of leads) {
+            // Insert into pending_tasks if not already present
+            const { error } = await supabase.from('pending_tasks').upsert({
+                id: lead.id || `lead_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+                sector: lead.sector,
+                target_asset: lead.target_asset,
+                estimated_value: lead.estimated_value || 0.40,
+                status: 'pending'
+            }, { onConflict: 'id', ignoreDuplicates: true });
+
+            if (!error) {
+                // Add to BullMQ queue for immediate background processing
+                await omniQueue.add('process-lead', { task: lead, template: lead.matchedTemplate });
+            }
+        }
+        console.log(`📥 [Ingestion] Successfully synced ${leads.length} fresh leads.`);
+    } catch (err) {
+        console.error('⚠️ [Ingestion Error]:', err.message);
+    }
+}
+
+// Run ingestion sync every 2 minutes
+setInterval(ingestExternalLeads, 120000);
+
+// ==========================================
+// 9. INDUSTRIAL AUTONOMOUS DAEMON ENGINE LOOP
+// ==========================================
+async function startAutonomousDaemon() {
+    // ... rest of your daemon loop code
+}
+
+startAutonomousDaemon();
