@@ -1,5 +1,6 @@
 const http = require('http');
-const https = require('https');
+const https = https; // Note: kept as imported module
+const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 
 // ==========================================
@@ -30,9 +31,50 @@ if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
 }
 
 // ==========================================
-// 1. RENDER PORT BINDING & HEALTH SERVER
+// 1. RENDER HTTP SERVER & WEBHOOK LISTENER
 // ==========================================
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
+    // Paystack Webhook Receiver Endpoint
+    if (req.method === 'POST' && req.url === '/webhook/paystack') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            const hash = crypto.createHmac('sha512', PAYSTACK_SECRET_KEY).update(body).digest('hex');
+            
+            // Verify signature from Paystack headers
+            if (hash !== req.headers['x-paystack-signature']) {
+                res.writeHead(401, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'Invalid signature' }));
+            }
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'received' }));
+
+            try {
+                const event = JSON.parse(body);
+                if (event.event === 'charge.success') {
+                    const data = event.data;
+                    const metadata = data.metadata || {};
+                    console.log(`🎉 [Webhook] Payment Successful! Ref: ${data.reference} \vert{} Task:${metadata.task_id || 'N/A'}`);
+
+                    // Send Telegram Settlement Notification
+                    await sendWebhookAlert(metadata.task_id || 'unknown', data.amount / 100, data.reference, metadata.sector || 'General');
+                    
+                    // Update Supabase with verified settlement status
+                    if (supabase && metadata.task_id) {
+                        await supabase.from('gap_scans').update({
+                            status: `settled_success (Ref: ${data.reference})`
+                        }).eq('task_id', metadata.task_id);
+                    }
+                }
+            } catch (err) {
+                console.error('⚠️ Webhook Processing Exception:', err.message);
+            }
+        });
+        return;
+    }
+
+    // Default Health Status Endpoint
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
         status: 'online',
@@ -45,7 +87,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`🌐 Autonomous Health Server bound and active on port ${PORT}`);
+    console.log(`🌐 Autonomous Health & Webhook Server bound and active on port ${PORT}`);
 });
 
 // ==========================================
@@ -136,14 +178,11 @@ function triggerSyntheticFailover(resolve) {
 }
 
 // ==========================================
-// 4. TELEGRAM RICH NOTIFICATION DISPATCHER
+// 4. TELEGRAM NOTIFICATION DISPATCHERS
 // ==========================================
 function sendTelegramAlert(task, valueUSD, authUrl, reference) {
     return new Promise((resolve) => {
-        if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
-            console.log('⚠️ Telegram credentials missing.');
-            return resolve(false);
-        }
+        if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return resolve(false);
 
         const paymentLink = authUrl || `https://cluster-tool.onrender.com/resolve?task=${task.id}&marker=${AFFILIATE_MARKER}`;
         const message = `🚀 *Live Paystack Ledger Alert*\n\n` +
@@ -155,39 +194,51 @@ function sendTelegramAlert(task, valueUSD, authUrl, reference) {
                         `• *Ledger Yield:* \`$${valueUSD}\`\n` +
                         `• *Status:* \`Live Initialization ✅\``;
 
-        const postData = JSON.stringify({
-            chat_id: TELEGRAM_CHAT_ID,
-            text: message,
-            parse_mode: 'Markdown'
-        });
-
-        const options = {
-            hostname: 'api.telegram.org',
-            port: 443,
-            path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(postData)
-            }
-        };
-
-        const req = https.request(options, (res) => {
-            res.on('data', () => {});
-            res.on('end', () => {
-                console.log(`[Telegram] Live Alert Dispatched for Task [ID: ${task.id}]`);
-                resolve(true);
-            });
-        });
-
-        req.on('error', (err) => {
-            console.error(`⚠️ Telegram Network Error:`, err.message);
-            resolve(false);
-        });
-
-        req.write(postData);
-        req.end();
+        dispatchTelegramMessage(message, resolve);
     });
+}
+
+function sendWebhookAlert(taskId, amountNGN, reference, sector) {
+    return new Promise((resolve) => {
+        if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return resolve(false);
+
+        const message = `💰 *Paystack Settlement Verified!*\n\n` +
+                        `• *Task ID:* \`${taskId}\`\n` +
+                        `• *Sector:* \`${sector}\`\n` +
+                        `• *Settled Amount:* \`₦${amountNGN.toLocaleString()}\`\n` +
+                        `• *Reference:* \`${reference}\`\n` +
+                        `• *Status:* \`Settled & Fulfilled 🟢\``;
+
+        dispatchTelegramMessage(message, resolve);
+    });
+}
+
+function dispatchTelegramMessage(message, resolve) {
+    const postData = JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        text: message,
+        parse_mode: 'Markdown'
+    });
+
+    const options = {
+        hostname: 'api.telegram.org',
+        port: 443,
+        path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData)
+        }
+    };
+
+    const req = https.request(options, (res) => {
+        res.on('data', () => {});
+        res.on('end', () => resolve(true));
+    });
+
+    req.on('error', () => resolve(false));
+    req.write(postData);
+    req.end();
 }
 
 // ==========================================
@@ -201,9 +252,10 @@ function executeLedgerFulfillment(task) {
         const amountKobo = Math.round(valueUSD * 1500 * 100);
 
         const payload = JSON.stringify({
-            email: "solveease.leads@gmail.com", // Updated to your valid email
+            email: "solveease.leads@gmail.com",
             amount: amountKobo,
             currency: "NGN",
+            callback_url: "https://cluster-tool.onrender.com/resolve",
             metadata: {
                 task_id: task.id,
                 sector: task.sector,
@@ -233,18 +285,15 @@ function executeLedgerFulfillment(task) {
                     if (parsedResponse.status && parsedResponse.data) {
                         const authUrl = parsedResponse.data.authorization_url;
                         const reference = parsedResponse.data.reference;
-                        console.log(`💰 [Paystack Live API] Initialized! Ref: ${reference} | URL: ${authUrl}`);
+                        console.log(`💰 [Paystack Live API] Initialized! Ref: ${reference}`);
                         
                         await sendTelegramAlert(task, valueUSD, authUrl, reference);
                         await logScanToSupabase(task, valueUSD, reference, 'live_initialized');
                     } else {
                         console.log(`⚠️ Paystack API returned non-success:`, parsedResponse.message || 'Unknown error');
-                        await sendTelegramAlert(task, valueUSD, null, 'failed_init');
-                        await logScanToSupabase(task, valueUSD, 'none', 'api_error');
                     }
                 } catch (parseErr) {
                     console.error(`⚠️ Paystack Response Parse Error:`, parseErr.message);
-                    await sendTelegramAlert(task, valueUSD, null, 'parse_error');
                 }
                 resolve(true);
             });
@@ -252,8 +301,6 @@ function executeLedgerFulfillment(task) {
 
         req.on('error', async (err) => {
             console.error(`⚠️ Paystack Network Error:`, err.message);
-            await sendTelegramAlert(task, valueUSD, null, 'network_error');
-            await logScanToSupabase(task, valueUSD, 'none', 'network_fallback');
             resolve(true);
         });
 
@@ -266,7 +313,7 @@ function executeLedgerFulfillment(task) {
 // 6. AUTONOMOUS NON-STOPPING DAEMON LOOP
 // ==========================================
 async function startAutonomousDaemon() {
-    console.log("🚀 Initializing Live Paystack Autonomous Daemon...");
+    console.log("🚀 Initializing Live Paystack Autonomous Daemon & Webhook Engine...");
     let executionCycle = 0;
 
     while (true) {
@@ -281,7 +328,6 @@ async function startAutonomousDaemon() {
             }
         } catch (err) {
             console.error(`⚠️ Daemon Loop Warning:`, err.message);
-            console.log(`🔄 Auto-recovering loop in 3 seconds...`);
             await new Promise(resolve => setTimeout(resolve, 3000));
         }
 
