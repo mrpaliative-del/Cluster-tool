@@ -1,5 +1,5 @@
 const http = require('http');
-const https = require('https');
+const https = https; // Node.js native https module
 const { createClient } = require('@supabase/supabase-js');
 
 // ==========================================
@@ -51,7 +51,7 @@ server.listen(PORT, () => {
 // ==========================================
 // 2. SUPABASE AUDIT LOGGER HELPER
 // ==========================================
-async function logScanToSupabase(task, valueUSD, status = 'completed') {
+async function logScanToSupabase(task, valueUSD, paystackRef, status = 'completed') {
     if (!supabase) return;
 
     try {
@@ -62,7 +62,7 @@ async function logScanToSupabase(task, valueUSD, status = 'completed') {
                 target_asset: task.payload.target_asset,
                 estimated_value: valueUSD,
                 worker_marker: AFFILIATE_MARKER,
-                status: status,
+                status: `${status} (Ref:${paystackRef || 'N/A'})`,
                 detected_at: new Date().toISOString()
             }
         ]);
@@ -138,21 +138,22 @@ function triggerSyntheticFailover(resolve) {
 // ==========================================
 // 4. TELEGRAM RICH NOTIFICATION DISPATCHER
 // ==========================================
-function sendTelegramAlert(task, valueUSD) {
+function sendTelegramAlert(task, valueUSD, authUrl, reference) {
     return new Promise((resolve) => {
         if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
             console.log('⚠️ Telegram credentials missing.');
             return resolve(false);
         }
 
-        const resolutionLink = `https://cluster-tool.onrender.com/resolve?task=${task.id}&marker=${AFFILIATE_MARKER}`;
-        const message = `🚀 *Shared Pool Daemon Alert*\n\n` +
+        const paymentLink = authUrl || `https://cluster-tool.onrender.com/resolve?task=${task.id}&marker=${AFFILIATE_MARKER}`;
+        const message = `🚀 *Live Paystack Ledger Alert*\n\n` +
                         `• *Task ID:* \`${task.id}\`\n` +
                         `• *Sector:* \`${task.sector}\`\n` +
                         `• *Target Asset:* *${task.payload.target_asset}*\n` +
-                        `• *Route:* [Access Deep-Link](${resolutionLink})\n` +
+                        `• *Paystack Ref:* \`${reference || 'N/A'}\`\n` +
+                        `• *Payment Gateway:* [Complete Checkout](${paymentLink})\n` +
                         `• *Ledger Yield:* \`$${valueUSD}\`\n` +
-                        `• *Status:* \`Paystack Confirmed ✅\``;
+                        `• *Status:* \`Live Initialization ✅\``;
 
         const postData = JSON.stringify({
             chat_id: TELEGRAM_CHAT_ID,
@@ -174,7 +175,7 @@ function sendTelegramAlert(task, valueUSD) {
         const req = https.request(options, (res) => {
             res.on('data', () => {});
             res.on('end', () => {
-                console.log(`📱 Telegram Alert Dispatched for Task [ID: ${task.id}]`);
+                console.log(`[Telegram] Live Alert Dispatched for Task [ID: ${task.id}]`);
                 resolve(true);
             });
         });
@@ -190,17 +191,18 @@ function sendTelegramAlert(task, valueUSD) {
 }
 
 // ==========================================
-// 5. PAYSTACK LEDGER SYNCHRONIZATION
+// 5. LIVE PAYSTACK LEDGER SYNCHRONIZATION
 // ==========================================
 function executeLedgerFulfillment(task) {
     return new Promise((resolve) => {
         const valueUSD = task.payload.estimated_value || 1.50;
         console.log(`🔍 [Scanning] Sector: ${task.sector} | Target: ${task.payload.target_asset} | Est. Value: $${valueUSD}`);
 
+        // Convert USD value to NGN Kobo (assuming ~1500 rate or standard scaling)
         const amountKobo = Math.round(valueUSD * 1500 * 100);
 
         const payload = JSON.stringify({
-            email: "autonomous-daemon@cluster-tool.internal",
+            email: "ayodele-daemon@cluster-tool.internal",
             amount: amountKobo,
             currency: "NGN",
             metadata: {
@@ -227,17 +229,32 @@ function executeLedgerFulfillment(task) {
             let resData = '';
             res.on('data', chunk => resData += chunk);
             res.on('end', async () => {
-                console.log(`💰 [Paystack Ledger] Yield synchronization confirmed for Task [ID: ${task.id}]`);
-                await sendTelegramAlert(task, valueUSD);
-                await logScanToSupabase(task, valueUSD, 'fulfilled');
+                try {
+                    const parsedResponse = JSON.parse(resData);
+                    if (parsedResponse.status && parsedResponse.data) {
+                        const authUrl = parsedResponse.data.authorization_url;
+                        const reference = parsedResponse.data.reference;
+                        console.log(`💰 [Paystack Live API] Initialized! Ref: ${reference} | URL: ${authUrl}`);
+                        
+                        await sendTelegramAlert(task, valueUSD, authUrl, reference);
+                        await logScanToSupabase(task, valueUSD, reference, 'live_initialized');
+                    } else {
+                        console.log(`⚠️ Paystack API returned non-success:`, parsedResponse.message || 'Unknown error');
+                        await sendTelegramAlert(task, valueUSD, null, 'failed_init');
+                        await logScanToSupabase(task, valueUSD, 'none', 'api_error');
+                    }
+                } catch (parseErr) {
+                    console.error(`⚠️ Paystack Response Parse Error:`, parseErr.message);
+                    await sendTelegramAlert(task, valueUSD, null, 'parse_error');
+                }
                 resolve(true);
             });
         });
 
-        req.on('error', async () => {
-            console.log(`⚠️ Paystack network notice. Dispatching priority fallback alerts.`);
-            await sendTelegramAlert(task, valueUSD);
-            await logScanToSupabase(task, valueUSD, 'fallback_fulfilled');
+        req.on('error', async (err) => {
+            console.error(`⚠️ Paystack Network Error:`, err.message);
+            await sendTelegramAlert(task, valueUSD, null, 'network_error');
+            await logScanToSupabase(task, valueUSD, 'none', 'network_fallback');
             resolve(true);
         });
 
@@ -250,7 +267,7 @@ function executeLedgerFulfillment(task) {
 // 6. AUTONOMOUS NON-STOPPING DAEMON LOOP
 // ==========================================
 async function startAutonomousDaemon() {
-    console.log("🚀 Initializing Global Multi-Sector Autonomous Daemon...");
+    console.log("🚀 Initializing Live Paystack Autonomous Daemon...");
     let executionCycle = 0;
 
     while (true) {
