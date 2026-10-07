@@ -1,5 +1,5 @@
 const http = require('http');
-const https = https = require('https');
+const https = require('https');
 const crypto = require('crypto');
 const url = require('url');
 const { createClient } = require('@supabase/supabase-js');
