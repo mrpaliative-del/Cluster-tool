@@ -3,7 +3,7 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION GLOBAL WORKER DAEMON
  * ============================================================================
  * File: index.js
- * Version: 4.2.0-Production
+ * Version: 4.2.1-Production
  * Architecture: Hybrid Ingestion (Supabase Queue + External API) + Playwright 
  * Headless Automation + Paystack Webhook Settlement & Telegram Alerts.
  * Minimum Payout Threshold Floor: >= $0.40 USD equivalent.
@@ -153,7 +153,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Industrial Zero-Starvation Task Execution Engine',
-        version: '4.2.0-Production',
+        version: '4.2.1-Production',
         marker: AFFILIATE_MARKER,
         supabase_connected: !!supabase,
         metrics: {
@@ -169,11 +169,14 @@ server.listen(PORT, () => {
 });
 
 // ==========================================
-// 3. ADVANCED TELEGRAM NOTIFICATION SYSTEM
+// 3. ADVANCED TIMEOUT-PROTECTED TELEGRAM SYSTEM
 // ==========================================
 function dispatchTelegramMessage(message) {
     return new Promise((resolve) => {
-        if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return resolve(false);
+        if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+            console.warn('⚠️ [Telegram] Skipped: Bot token or chat ID missing.');
+            return resolve(false);
+        }
 
         const postData = JSON.stringify({
             chat_id: TELEGRAM_CHAT_ID,
@@ -189,12 +192,28 @@ function dispatchTelegramMessage(message) {
             headers: {
                 'Content-Type': 'application/json',
                 'Content-Length': Buffer.byteLength(postData)
-            }
+            },
+            timeout: 10000 // 10-second hard timeout to prevent hanging
         };
 
         const req = https.request(options, (res) => {
-            res.on('data', () => {});
-            res.on('end', () => resolve(true));
+            let responseBody = '';
+            res.on('data', chunk => responseBody += chunk);
+            res.on('end', () => {
+                if (res.statusCode === 200) {
+                    console.log('📱 [Telegram] Alert dispatched successfully.');
+                    resolve(true);
+                } else {
+                    console.error(`❌ [Telegram API Error] Status ${res.statusCode}:${responseBody}`);
+                    resolve(false);
+                }
+            });
+        });
+
+        req.on('timeout', () => {
+            console.error('❌ [Telegram Error]: Request timed out.');
+            req.destroy();
+            resolve(false);
         });
 
         req.on('error', (err) => {
