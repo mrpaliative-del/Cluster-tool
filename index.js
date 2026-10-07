@@ -1,5 +1,5 @@
 const http = require('http');
-const https = https; // Note: kept as imported module
+const https = require('https');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 
