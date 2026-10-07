@@ -1,7 +1,6 @@
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
-const url = require('url');
 const { createClient } = require('@supabase/supabase-js');
 
 // ==========================================
@@ -35,8 +34,11 @@ if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
 // 1. RENDER HTTP SERVER & ROUTE HANDLERS
 // ==========================================
 const server = http.createServer(async (req, res) => {
-    const parsedUrl = url.parse(req.url, true);
+    // Modern WHATWG URL parsing
+    const baseUrl = `http://${req.headers.host || 'localhost'}`;
+    const parsedUrl = new URL(req.url, baseUrl);
     const pathname = parsedUrl.pathname;
+    const queryParams = parsedUrl.searchParams;
 
     // A. Paystack Webhook Receiver Endpoint
     if (req.method === 'POST' && pathname === '/webhook/paystack') {
@@ -78,9 +80,8 @@ const server = http.createServer(async (req, res) => {
 
     // B. Resolution & Deep Link Handler (Telegram / Affiliate Click-Through)
     if (req.method === 'GET' && pathname === '/resolve') {
-        const queryParams = parsedUrl.query;
-        const taskId = queryParams.task || 'unknown';
-        const marker = queryParams.marker || AFFILIATE_MARKER;
+        const taskId = queryParams.get('task') || 'unknown';
+        const marker = queryParams.get('marker') || AFFILIATE_MARKER;
 
         console.log(`🔗 [Resolution Route] Click registered for Task: ${taskId} using marker:${marker}`);
 
