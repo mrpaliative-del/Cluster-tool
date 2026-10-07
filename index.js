@@ -201,7 +201,7 @@ function executeLedgerFulfillment(task) {
         const amountKobo = Math.round(valueUSD * 1500 * 100);
 
         const payload = JSON.stringify({
-            email: "ayodele-daemon@cluster-tool.internal",
+            email: "solveease.leads@gmail.com", // Updated to your valid email
             amount: amountKobo,
             currency: "NGN",
             metadata: {
