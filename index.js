@@ -1,5 +1,5 @@
 const http = require('http');
-const https = https; // Node.js native https module
+const https = require('https');
 const { createClient } = require('@supabase/supabase-js');
 
 // ==========================================
@@ -198,7 +198,6 @@ function executeLedgerFulfillment(task) {
         const valueUSD = task.payload.estimated_value || 1.50;
         console.log(`🔍 [Scanning] Sector: ${task.sector} | Target: ${task.payload.target_asset} | Est. Value: $${valueUSD}`);
 
-        // Convert USD value to NGN Kobo (assuming ~1500 rate or standard scaling)
         const amountKobo = Math.round(valueUSD * 1500 * 100);
 
         const payload = JSON.stringify({
