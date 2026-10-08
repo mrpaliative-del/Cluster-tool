@@ -99,7 +99,7 @@ app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
     service: 'Autonomous Outbound & Optimized Task Spooler',
-    architecture: 'Native Monolithic Node.js/Playwright + Real-Time Adaptive Engine',
+    architecture: 'Native Monolithic Node.js/Playwright + Real-Time Event-Driven Engine',
     timestamp: new Date().toISOString()
   });
 });
@@ -165,13 +165,13 @@ app.get('/api/tasks/flush', async (req, res) => {
   }
 });
 
-// 4. MANUAL OR PARTNER BULK TASK INJECTION WITH TELEMETRY AMOUNT
+// 4. TASK INGESTION ENDPOINT
 app.post('/api/tasks/submit', async (req, res) => {
   try {
     const { tasks } = req.body;
     const taskList = Array.isArray(tasks) ? tasks : [req.body];
 
-    if (!taskList.length || !taskList[0].taskId) {
+    if (!taskList.length || !taskList[0].taskId || !taskList[0].targetUrl) {
       return res.status(400).json({ error: 'Invalid task payload. Provide taskId and targetUrl.' });
     }
 
@@ -201,6 +201,11 @@ app.post('/api/tasks/submit', async (req, res) => {
     );
 
     console.log(`📥 [Verified Ingest] Successfully queued ${taskList.length} legit paid tasks.`);
+    
+    // Immediately wake up the spooler to process real tasks right away
+    clearTimeout(adaptiveTimer);
+    adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 500);
+
     res.status(200).json({ status: 'queued', count: taskList.length });
   } catch (error) {
     console.error('[Task Queue Error - Non-Fatal]', error);
@@ -209,18 +214,8 @@ app.post('/api/tasks/submit', async (req, res) => {
 });
 
 // ==========================================
-// 5. PLAYWRIGHT AUTOMATION & ADAPTIVE ENGINE LOGIC
+// 5. PLAYWRIGHT AUTOMATION ENGINE
 // ==========================================
-
-async function getAdaptiveNicheTarget() {
-  return {
-    taskId: `niche-lock-${Math.floor(100000 + Math.random() * 900000)}`,
-    sector: 'Global Travel & Merchant Compliance Corridor',
-    targetUrl: 'https://example.com',
-    payoutUSD: 0.50,
-    verified: true
-  };
-}
 
 async function executePlaywrightTask(task) {
   if (circuitBreakers[task.targetUrl] && Date.now() < circuitBreakers[task.targetUrl]) {
@@ -254,7 +249,7 @@ async function executePlaywrightTask(task) {
 
     const page = await context.newPage();
     
-    await page.goto(task.targetUrl, { timeout: 20000, waitUntil: 'commit' });
+    await page.goto(task.targetUrl, { timeout: 25000, waitUntil: 'commit' });
     const targetTitle = await page.title() || 'Verified Target';
     
     const pageContent = await page.content();
@@ -285,7 +280,6 @@ async function executeWithRecoveryBridge(task) {
   } catch (error) {
     systemMetrics.recoveredAnomalies++;
     console.warn(`⚠️ [Recovery Bridge] Anomaly intercepted on ${task.targetUrl}:${error.message}`);
-    console.log(`🔄 [Recovery Bridge] Preserving system momentum and applying safety bypass...`);
     
     await dispatchTelegramMessage(
       `⚠️ *Bridge Engaged*\nRecovered safely from exception on: \`${task.targetUrl}\`\nReason: ${error.message}`
@@ -301,28 +295,26 @@ async function runVerifiedTaskSpooler() {
     const batchSize = 2;
     const batchTasks = [];
 
+    // Pull real tasks from Redis queue
     for (let i = 0; i < batchSize; i++) {
       try {
         let rawTask = await redisClient.lPop('tasks:verified_queue');
         if (!rawTask) break;
-        
-        let parsedTask = JSON.parse(rawTask);
-        if (parsedTask.targetUrl && parsedTask.targetUrl.includes('rapidapi.com')) {
-          parsedTask.targetUrl = 'https://example.com';
-        }
-        batchTasks.push(parsedTask);
+        batchTasks.push(JSON.parse(rawTask));
       } catch (popErr) {
         break;
       }
     }
 
+    // If queue is empty, do NOT run fake heartbeats. Go into efficient idle mode.
     if (batchTasks.length === 0) {
-      console.log(`💓 [Anti-Starvation Heartbeat] Activating fallback niche scan to eliminate idle starvation...`);
-      const heartbeatTask = await getAdaptiveNicheTarget();
-      batchTasks.push(heartbeatTask);
+      console.log(`💤 [Queue Idle] No pending tasks in queue. Standing by for ingestion or webhook events...`);
+      clearTimeout(adaptiveTimer);
+      adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 60000); // Check every minute quietly
+      return;
     }
 
-    console.log(`📦 [Bulk Verified Spooler] Processing batch of ${batchTasks.length} legit paid tasks...`);
+    console.log(`📦 [Bulk Verified Spooler] Processing batch of ${batchTasks.length} real tasks...`);
 
     for (const task of batchTasks) {
       try {
@@ -348,13 +340,9 @@ async function runVerifiedTaskSpooler() {
       }
     }
 
+    // Continue processing if more items remain in queue
     const remainingQueue = await redisClient.lLen('tasks:verified_queue').catch(() => 0);
-    const nextCadence = remainingQueue > 0 ? 30000 : 300000;
-
-    if (systemMetrics.currentCadenceMs !== nextCadence) {
-      systemMetrics.currentCadenceMs = nextCadence;
-      console.log(`⚡ [Adaptive Polling] Cadence dynamically adjusted to ${nextCadence / 1000} seconds.`);
-    }
+    const nextCadence = remainingQueue > 0 ? 5000 : 60000;
 
     clearTimeout(adaptiveTimer);
     adaptiveTimer = setTimeout(runVerifiedTaskSpooler, nextCadence);
@@ -362,11 +350,12 @@ async function runVerifiedTaskSpooler() {
   } catch (globalSpoolerErr) {
     console.error(`🛡️ [Spooler Circuit Breaker] Handled background exception:`, globalSpoolerErr.message);
     clearTimeout(adaptiveTimer);
-    adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 300000);
+    adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 60000);
   }
 }
 
-setTimeout(runVerifiedTaskSpooler, 5000);
+// Start spooler loop on boot
+setTimeout(runVerifiedTaskSpooler, 3000);
 
 
 // ==========================================
@@ -414,26 +403,17 @@ app.post('/api/webhook/paystack', async (req, res) => {
 
         console.log(`💰 [Out-of-Band Wallet Credited] Task ${taskId} added $${estimatedUSD}. Balance: $${currentBalanceUSD.toFixed(2)}`);
 
-        if (currentBalanceUSD >= 5.00) {
-          await dispatchTelegramMessage(
-            `💰 *Paystack Balance Threshold Reached!*\n\n` +
-            `• *Current Balance:* \`$${currentBalanceUSD.toFixed(2)} (~₦${(currentBalanceUSD * 1500).toLocaleString()})\`\n` +
-            `• *Status:* Retained safely in Paystack balance.\n` +
-            `• *Trigger Ref:* \`${reference}\``
-          );
-        } else {
-          await dispatchTelegramMessage(
-            `💰 *Verified Paid Webhook Processed (Out-of-Band)*\n\n` +
-            `• *Task ID:* \`${taskId}\`\n` +
-            `• *Sector:* \`${sector}\`\n` +
-            `• *Amount:* \`₦${amountNGN.toLocaleString()}\` (~$${estimatedUSD})\n` +
-            `• *Wallet Balance:* \`$${currentBalanceUSD.toFixed(2)} / $5.00 Target\`\n` +
-            `• *Reference:* \`${reference}\``
-          );
-        }
+        await dispatchTelegramMessage(
+          `💰 *Verified Paid Webhook Processed (Out-of-Band)*\n\n` +
+          `• *Task ID:* \`${taskId}\`\n` +
+          `• *Sector:* \`${sector}\`\n` +
+          `• *Amount:* \`₦${amountNGN.toLocaleString()}\` (~$${estimatedUSD})\n` +
+          `• *Wallet Balance:* \`$${currentBalanceUSD.toFixed(2)} / $5.00 Target\`\n` +
+          `• *Reference:* \`${reference}\``
+        );
 
         clearTimeout(adaptiveTimer);
-        adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 1000);
+        adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 500);
       }
     } catch (error) {
       console.error('[Out-of-Band Webhook Error - Handled Safely]', error);
@@ -445,5 +425,5 @@ app.post('/api/webhook/paystack', async (req, res) => {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Autonomous Outbound Engine running securely on port ${PORT} (Real-Time Adaptive Mode Active)`);
+  console.log(`Autonomous Outbound Engine running securely on port ${PORT} (Event-Driven Mode Active)`);
 });
