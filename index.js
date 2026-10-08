@@ -3,7 +3,7 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION LOCAL FILE DAEMON
  * ============================================================================
  * File: index.js
- * Version: 5.2.7-Production-Zero-Starvation-Integrated
+ * Version: 5.2.8-Production-Zero-Starvation-RateLimited
  * Architecture: Local JSON File Queue (`tasks.json`) + BullMQ + 
  * Playwright Headless Automation + Paystack Webhook Settlement & KeepAlive.
  * ============================================================================
@@ -22,7 +22,7 @@ const IORedis = require('ioredis');
 // 1. CONFIGURATION & ENVIRONMENT SETUP
 // ==========================================
 const PORT = process.env.PORT || 10000;
-const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 6000;
+const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 15000; // Defaults cleanly to 15s
 const AFFILIATE_MARKER = process.env.AFFILIATE_MARKER || 'global_cluster_master_01';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
 const TASKS_FILE = path.join(__dirname, 'tasks.json');
@@ -140,7 +140,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Local JSON File Task Execution Engine (Zero-Starvation Autonomous Cluster)',
-        version: '5.2.7-Production-Zero-Starvation-Integrated',
+        version: '5.2.8-Production-Zero-Starvation-RateLimited',
         marker: AFFILIATE_MARKER,
         metrics: {
             ...metrics,
@@ -180,8 +180,11 @@ function startSelfPingDaemon() {
 }
 
 // ==========================================
-// 4. ADVANCED HIGH-PRIORITY TELEGRAM SYSTEM
+// 4. ADVANCED HIGH-PRIORITY TELEGRAM SYSTEM (WITH RATE-LIMIT COOLDOWN)
 // ==========================================
+let lastTelegramAlertTime = 0;
+const TELEGRAM_COOLDOWN_MS = 12000; // 12-second minimum gap to prevent HTTP 429 Too Many Requests
+
 function dispatchTelegramMessage(message, disableNotification = false) {
     return new Promise((resolve) => {
         if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
@@ -189,11 +192,19 @@ function dispatchTelegramMessage(message, disableNotification = false) {
             return resolve(false);
         }
 
+        const now = Date.now();
+        // Prevent spamming the API by enforcing a time gap between non-silent alerts
+        if (!disableNotification && (now - lastTelegramAlertTime < TELEGRAM_COOLDOWN_MS)) {
+            console.log('📱 [Telegram] Alert throttled by cooldown guard to prevent 429 limits.');
+            return resolve(false);
+        }
+        lastTelegramAlertTime = now;
+
         const postData = JSON.stringify({
             chat_id: TELEGRAM_CHAT_ID,
             text: message,
             parse_mode: 'Markdown',
-            disable_notification: disableNotification // False ensures sound/vibration alerts
+            disable_notification: disableNotification 
         });
 
         const options = {
@@ -480,7 +491,6 @@ async function startAutonomousDaemon() {
             if (!dispatched) {
                 process.stdout.write('.');
             } else {
-                // Task dispatched successfully, loop immediately for maximum velocity
                 continue;
             }
         } catch (daemonErr) {
