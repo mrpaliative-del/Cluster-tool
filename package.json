@@ -8,8 +8,6 @@
     "postinstall": "npx playwright install chromium"
   },
   "dependencies": {
-    "bullmq": "^5.0.0",
-    "ioredis": "^5.3.0",
     "playwright": "^1.40.0"
   }
 }
