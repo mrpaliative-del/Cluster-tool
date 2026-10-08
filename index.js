@@ -3,9 +3,9 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION LOCAL FILE DAEMON
  * ============================================================================
  * File: index.js
- * Version: 5.2.4-Production-Unified-Local
+ * Version: 5.2.5-Production-KeepAlive
  * Architecture: Local JSON File Queue (`tasks.json`) + BullMQ + 
- * Playwright Headless Automation + Paystack Webhook Settlement & Telegram Alerts.
+ * Playwright Headless Automation + Paystack Webhook Settlement & KeepAlive.
  * ============================================================================
  */
 
@@ -140,7 +140,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Local JSON File Task Execution Engine (BullMQ Integrated)',
-        version: '5.2.4-Production-Unified-Local',
+        version: '5.2.5-Production-KeepAlive',
         marker: AFFILIATE_MARKER,
         metrics: {
             ...metrics,
@@ -152,10 +152,32 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
     console.log(`🌐 [Server] Master HTTP listener bound securely on port ${PORT}`);
+    startSelfPingDaemon();
 });
 
 // ==========================================
-// 3. ADVANCED TIMEOUT-PROTECTED TELEGRAM SYSTEM
+// 3. SELF-PING KEEPALIVE DAEMON (Prevents Cold Starts)
+// ==========================================
+function startSelfPingDaemon() {
+    const PING_INTERVAL_MS = 10 * 60 * 1000; // Ping every 10 minutes
+    const targetUrl = `http://localhost:${PORT}/`;
+
+    setInterval(() => {
+        http.get(targetUrl, (res) => {
+            res.on('data', () => {}); // Consume stream data
+            res.on('end', () => {
+                console.log(`💓 [KeepAlive] Self-ping successful (Status: ${res.statusCode})`);
+            });
+        }).on('error', (err) => {
+            console.error(`⚠️ [KeepAlive Error]:`, err.message);
+        });
+    }, PING_INTERVAL_MS);
+
+    console.log(`🛡️ [KeepAlive] Internal self-ping daemon initialized (Interval: 10 mins)`);
+}
+
+// ==========================================
+// 4. ADVANCED TIMEOUT-PROTECTED TELEGRAM SYSTEM
 // ==========================================
 function dispatchTelegramMessage(message) {
     return new Promise((resolve) => {
@@ -238,7 +260,7 @@ function sendWebhookAlert(taskId, amountNGN, reference, sector) {
 }
 
 // ==========================================
-// 4. PLAYWRIGHT AUTOMATION ENGINE CORE
+// 5. PLAYWRIGHT AUTOMATION ENGINE CORE
 // ==========================================
 async function executePlaywrightAutomation(task, template) {
     console.log(`🤖 [Playwright Worker] Initializing headless daemon for: "${template.template_name}"`);
@@ -306,7 +328,7 @@ async function executePlaywrightAutomation(task, template) {
 }
 
 // ==========================================
-// 5. BULLMQ WORKER REGISTRATION & LISTENERS
+// 6. BULLMQ WORKER REGISTRATION & LISTENERS
 // ==========================================
 const omniWorker = new Worker(
     'omni-task-queue',
@@ -347,7 +369,7 @@ omniWorker.on('error', (err) => {
 });
 
 // ==========================================
-// 6. LOCAL FILE TASK ROUTER & POLLING DAEMON
+// 7. LOCAL FILE TASK ROUTER & POLLING DAEMON
 // ==========================================
 async function fetchAndRouteNextTask() {
     try {
@@ -432,7 +454,7 @@ async function fetchAndRouteNextTask() {
 }
 
 // ==========================================
-// 7. INDUSTRIAL AUTONOMOUS DAEMON ENGINE LOOP
+// 8. INDUSTRIAL AUTONOMOUS DAEMON ENGINE LOOP
 // ==========================================
 async function startAutonomousDaemon() {
     console.log(`🚀 [Daemon] Local file task polling loop started (Interval: ${POLL_INTERVAL_MS}ms)`);
@@ -454,29 +476,5 @@ async function startAutonomousDaemon() {
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
     }
 }
-// ==========================================
-// SELF-PING KEEPALIVE DAEMON (Prevents Cold Starts)
-// ==========================================
-function startSelfPingDaemon() {
-    const PING_INTERVAL_MS = 10 * 60 * 1000; // Ping every 10 minutes
-    const targetUrl = `http://localhost:${PORT}/`;
-
-    setInterval(() => {
-        http.get(targetUrl, (res) => {
-            // Consume response data to free up memory
-            res.on('data', () => {});
-            res.on('end', () => {
-                console.log(`💓 [KeepAlive] Self-ping successful (Status: ${res.statusCode})`);
-            });
-        }).on('err', (err) => {
-            console.error(`⚠️ [KeepAlive Error]:`, err.message);
-        });
-    }, PING_INTERVAL_MS);
-
-    console.log(`🛡️ [KeepAlive] Internal self-ping daemon initialized (Interval: 10 mins)`);
-}
-
-// Call this right after starting your server or daemon
-startSelfPingDaemon();
 
 startAutonomousDaemon();
