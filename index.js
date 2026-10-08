@@ -1,19 +1,19 @@
 /**
  * ============================================================================
- * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION GLOBAL WORKER DAEMON
+ * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION LOCAL FILE DAEMON
  * ============================================================================
  * File: index.js
- * Version: 4.2.3-Production-Unified
- * Architecture: Hybrid Ingestion (Supabase + BullMQ Queue + External API) + 
- * Playwright Headless Automation + Paystack Webhook Settlement & Telegram Alerts.
- * Minimum Payout Threshold Floor: >= $0.40 USD equivalent.
+ * Version: 5.0.0-Local-Standalone
+ * Architecture: Local JSON File Queue (`tasks.json`) + BullMQ + 
+ * Playwright Headless Automation + Telegram Alerts.
  * ============================================================================
  */
 
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
-const { createClient } = require('@supabase/supabase-js');
+const fs = require('fs');
+const path = require('path');
 const { chromium } = require('playwright');
 const { Queue, Worker } = require('bullmq');
 const IORedis = require('ioredis');
@@ -25,25 +25,11 @@ const PORT = process.env.PORT || 10000;
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 6000;
 const AFFILIATE_MARKER = process.env.AFFILIATE_MARKER || 'global_cluster_master_01';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
-const LEADS_SCANNER_ENDPOINT = process.env.LEADS_SCANNER_ENDPOINT || '';
+const TASKS_FILE = path.join(__dirname, 'tasks.json');
 
 // Telegram Notification Credentials
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '5058299552';
-
-// Supabase Configuration
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-
-let supabase = null;
-if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-    supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-        auth: { persistSession: false, autoRefreshToken: false }
-    });
-    console.log('📦 [Supabase] Production database client initialized successfully.');
-} else {
-    console.warn('⚠️ [Supabase] Missing core credentials. Database tracking bypassed.');
-}
 
 // Redis & BullMQ Setup
 const redisConnection = new IORedis({
@@ -93,19 +79,8 @@ const server = http.createServer(async (req, res) => {
                 if (event.event === 'charge.success') {
                     const data = event.data;
                     const metadata = data.metadata || {};
-                    const amountUSD = (data.amount / 100) / 1500; // NGN to USD conversion baseline
-
                     console.log(`🎉 [Webhook] Paystack Charge Success! Ref: ${data.reference} \vert{} Task:${metadata.task_id || 'N/A'}`);
-
                     await sendWebhookAlert(metadata.task_id || 'unknown', data.amount / 100, data.reference, metadata.sector || 'General');
-                    
-                    if (supabase && metadata.task_id) {
-                        await supabase.from('pending_tasks').update({ status: 'settled_success' }).eq('id', metadata.task_id);
-                        await supabase.from('task_ledger').insert({
-                            payout_amount: Math.max(amountUSD, 0.40), // enforce minimum floor
-                            platform_source: `Paystack Settlement (${metadata.sector || 'General'})`
-                        });
-                    }
                 }
             } catch (err) {
                 console.error('⚠️ [Webhook Processing Exception]:', err.message);
@@ -120,14 +95,6 @@ const server = http.createServer(async (req, res) => {
         const marker = queryParams.get('marker') || AFFILIATE_MARKER;
 
         console.log(`🔗 [Resolution Route] Click intercepted for Task ID: ${taskId} using marker:${marker}`);
-
-        if (supabase && taskId !== 'unknown') {
-            try {
-                await supabase.from('pending_tasks').update({ status: 'resolved_clicked' }).eq('id', taskId);
-            } catch (e) {
-                console.error('⚠️ [Resolution DB Error]:', e.message);
-            }
-        }
 
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         return res.end(`
@@ -151,7 +118,6 @@ const server = http.createServer(async (req, res) => {
                     <div class="badge">Marker Node: ${marker}</div>
                     <h2>Resolution Route Verified</h2>
                     <p>Task reference <strong>${taskId}</strong> has been successfully tracked, parsed, and routed through the automated zero-starvation framework.</p>
-                    <p>Execution audit logs have been committed to the secure ledger.</p>
                     <div class="footer-note">FlyMatrix Autonomous Processing Engine &bull; Secure Gateway</div>
                 </div>
             </body>
@@ -163,10 +129,9 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
         status: 'online',
-        service: 'Industrial Zero-Starvation Task Execution Engine (BullMQ Integrated)',
-        version: '4.2.3-Production-Unified',
+        service: 'Local JSON File Task Execution Engine (BullMQ Integrated)',
+        version: '5.0.0-Local-Standalone',
         marker: AFFILIATE_MARKER,
-        supabase_connected: !!supabase,
         metrics: {
             ...metrics,
             uptime_seconds: Math.floor((Date.now() - metrics.uptimeStarted) / 1000)
@@ -246,7 +211,7 @@ function sendTaskAlert(task, template, payoutAmount, authUrl) {
                     `• *Target Asset:* \`${task.payload.target_asset || 'N/A'}\`\n` +
                     `• *Verified Payout:* \`$${payoutAmount.toFixed(2)}\`\n` +
                     `• *Gateway Resolution:* [Open Secure Link](${paymentLink})\n` +
-                    `• *Daemon Status:* \`Processed & Committed ✅\``;
+                    `• *Daemon Status:* \`Processed Locally ✅\``;
 
     return dispatchTelegramMessage(message);
 }
@@ -309,17 +274,7 @@ async function executePlaywrightAutomation(task, template) {
 
         const computedPayout = Math.max(task.payload.estimated_value || template.minimum_payout || 0.40, 0.40);
 
-        if (supabase) {
-            await supabase.from('task_ledger').insert({
-                template_id: template.id,
-                payout_amount: computedPayout,
-                platform_source: template.template_name
-            });
-
-            await supabase.from('pending_tasks').update({ status: 'completed_automation' }).eq('id', task.id);
-        }
-
-        console.log(`✅ [Worker Success] Automation complete. Logged $${computedPayout.toFixed(2)} to ledger.`);
+        console.log(`✅ [Worker Success] Automation complete. Computed Payout: $${computedPayout.toFixed(2)}`);
         metrics.tasksProcessedSuccessfully++;
         metrics.lastActiveTimestamp = new Date().toISOString();
 
@@ -329,11 +284,6 @@ async function executePlaywrightAutomation(task, template) {
     } catch (err) {
         console.error(`❌ [Playwright Worker Error]:`, err.message);
         metrics.tasksFailed++;
-
-        if (supabase && task.id) {
-            await supabase.from('pending_tasks').update({ status: 'failed_automation' }).eq('id', task.id);
-        }
-
         await dispatchTelegramMessage(`❌ *Task Automation Failure*\n\n*Template:* ${template.template_name}\n*Error:* ${err.message}`);
         throw err;
 
@@ -375,115 +325,98 @@ omniWorker.on('completed', (job) => {
 });
 
 // ==========================================
-// 6. HYBRID TEMPLATE ROUTER & QUEUE DISPATCHER
+// 6. LOCAL FILE TASK ROUTER & POLLING DAEMON
 // ==========================================
 async function fetchAndRouteNextTask() {
-    if (!supabase) return false;
-
     try {
-        const { data: templates, error: tError } = await supabase
-            .from('locked_task_templates')
-            .select('*')
-            .eq('is_active', true);
+        if (!fs.existsSync(TASKS_FILE)) {
+            // Initialize default local file structure if missing
+            const initialData = {
+                templates: [
+                    {
+                        id: "tpl-01",
+                        template_name: "General Flight & Task Automation",
+                        keyword_trigger: "General",
+                        minimum_payout: 0.40,
+                        is_active: true,
+                        action_schema: {
+                            target_url: "https://cluster-tool.onrender.com/",
+                            steps: []
+                        }
+                    }
+                ],
+                tasks: [
+                    {
+                        id: "task-001",
+                        sector: "General",
+                        target_asset: "Test Asset",
+                        estimated_value: 0.50,
+                        status: "pending"
+                    }
+                ]
+            };
+            fs.writeFileSync(TASKS_FILE, JSON.stringify(initialData, null, 2));
+        }
 
-        if (tError || !templates || templates.length === 0) {
+        const rawData = fs.readFileSync(TASKS_FILE, 'utf8');
+        const dbData = JSON.parse(rawData);
+        
+        const templates = dbData.templates || [];
+        const tasks = dbData.tasks || [];
+
+        const pendingTaskIndex = tasks.findIndex(t => t.status === 'pending');
+        if (pendingTaskIndex === -1 || templates.length === 0) {
             return false;
         }
 
-        const { data: taskData, error: qError } = await supabase
-            .from('pending_tasks')
-            .select('*')
-            .eq('status', 'pending')
-            .order('created_at', { ascending: true })
-            .limit(1)
-            .single();
-
-        if (qError || !taskData) {
-            return false;
-        }
+        const taskData = tasks[pendingTaskIndex];
 
         const matchedTemplate = templates.find(t => {
             const matchesKeyword = (taskData.sector && taskData.sector.toLowerCase().includes(t.keyword_trigger.toLowerCase())) ||
                                    (taskData.target_asset && taskData.target_asset.toLowerCase().includes(t.keyword_trigger.toLowerCase()));
             const satisfiesPayout = (taskData.estimated_value || 0.40) >= t.minimum_payout;
-            return matchesKeyword && satisfiesPayout;
+            return matchesKeyword && satisfiesPayout && t.is_active;
         });
 
         if (matchedTemplate) {
-            const { error: lockError } = await supabase
-                .from('pending_tasks')
-                .update({ status: 'processing', worker_marker: AFFILIATE_MARKER })
-                .eq('id', taskData.id)
-                .eq('status', 'pending');
+            // Mark task as processing locally
+            tasks[pendingTaskIndex].status = 'processing';
+            tasks[pendingTaskIndex].worker_marker = AFFILIATE_MARKER;
+            fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
 
-            if (!lockError) {
-                console.log(`🎯 [Router Match] Task ID [${taskData.id}] matched template: "${matchedTemplate.template_name}". Enqueuing to BullMQ...`);
-                
-                await omniQueue.add('execute-omni-task', {
-                    task: {
-                        id: taskData.id,
-                        sector: taskData.sector,
-                        payload: {
-                            target_asset: taskData.target_asset,
-                            estimated_value: taskData.estimated_value,
-                            url: matchedTemplate.action_schema.target_url
-                        }
-                    },
-                    template: matchedTemplate
-                });
+            console.log(`🎯 [Router Match] Task ID [${taskData.id}] matched template: "${matchedTemplate.template_name}". Enqueuing to BullMQ...`);
+            
+            await omniQueue.add('execute-omni-task', {
+                task: {
+                    id: taskData.id,
+                    sector: taskData.sector,
+                    payload: {
+                        target_asset: taskData.target_asset,
+                        estimated_value: taskData.estimated_value,
+                        url: matchedTemplate.action_schema.target_url
+                    }
+                },
+                template: matchedTemplate
+            });
 
-                return true;
-            }
+            // Update status to completed after queue dispatch
+            tasks[pendingTaskIndex].status = 'completed_automation';
+            fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
+
+            return true;
         }
     } catch (err) {
-        // Silent recovery on empty queue or transient dispatches
+        console.error('⚠️ [Local Polling Exception]:', err.message);
     }
 
     return false;
 }
 
 // ==========================================
-// 7. EXTERNAL LEADS SCANNER & INGESTION
-// ==========================================
-async function ingestExternalLeads() {
-    if (!LEADS_SCANNER_ENDPOINT || !supabase) return;
-
-    try {
-        console.log('🔄 [Ingestion] Polling external lead scanner endpoint...');
-        const response = await fetch(LEADS_SCANNER_ENDPOINT, {
-            headers: { 'Authorization': `Bearer ${process.env.SCANNER_API_KEY || ''}` }
-        });
-        
-        if (!response.ok) return;
-        const leads = await response.json();
-
-        for (const lead of leads) {
-            const { error } = await supabase.from('pending_tasks').upsert({
-                id: lead.id || `lead_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-                sector: lead.sector,
-                target_asset: lead.target_asset,
-                estimated_value: lead.estimated_value || 0.40,
-                status: 'pending'
-            }, { onConflict: 'id', ignoreDuplicates: true });
-
-            if (!error) {
-                await omniQueue.add('process-lead', { task: lead, template: lead.matchedTemplate });
-            }
-        }
-        console.log(`📥 [Ingestion] Successfully synced ${leads.length} fresh leads.`);
-    } catch (err) {
-        console.error('⚠️ [Ingestion Error]:', err.message);
-    }
-}
-
-// Run ingestion sync every 2 minutes
-setInterval(ingestExternalLeads, 120000);
-
-// ==========================================
-// 8. INDUSTRIAL AUTONOMOUS DAEMON ENGINE LOOP
+// 7. INDUSTRIAL AUTONOMOUS DAEMON ENGINE LOOP
 // ==========================================
 async function startAutonomousDaemon() {
-    console.log(`🚀 [Daemon] Background task polling loop started (Interval: ${POLL_INTERVAL_MS}ms)`);
+    console.log(`🚀 [Daemon] Local file task polling loop started (Interval: ${POLL_INTERVAL_MS}ms)`);
 
     while (true) {
         try {
@@ -493,7 +426,6 @@ async function startAutonomousDaemon() {
             if (!dispatched) {
                 process.stdout.write('.');
             } else {
-                // If a task was successfully routed, check immediately for another one
                 continue;
             }
         } catch (daemonErr) {
