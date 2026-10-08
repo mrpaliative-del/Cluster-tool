@@ -1,10 +1,11 @@
 const express = require('express');
 const crypto = require('crypto');
+const https = require('https');
 const Redis = require('redis');
 
 const app = express();
 
-// Sanitize REDIS_URL to remove hidden invisible Unicode characters (e.g., LTR marks) or whitespace
+// Sanitize REDIS_URL to remove hidden invisible Unicode characters or whitespace
 const rawRedisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const sanitizedRedisUrl = rawRedisUrl.replace(/^[\s\u200e\u200f\u202a-\u202e]+/, '').trim();
 
@@ -21,7 +22,42 @@ redisClient.connect().then(() => {
   console.log('[Redis] Connected successfully to state store.');
 }).catch(console.error);
 
-// 1. RAW BODY CAPTURE FOR PAYSTACK HMAC VERIFICATION
+// 1. CONFIG & TELEGRAM TELEMETRY SETUP
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
+
+function dispatchTelegramMessage(message) {
+  return new Promise((resolve) => {
+    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return resolve(false);
+
+    const postData = JSON.stringify({
+      chat_id: TELEGRAM_CHAT_ID,
+      text: message,
+      parse_mode: 'Markdown'
+    });
+
+    const options = {
+      hostname: 'api.telegram.org',
+      port: 443,
+      path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+      timeout: 10000
+    };
+
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => resolve(res.statusCode === 200));
+    });
+    req.on('error', () => resolve(false));
+    req.write(postData);
+    req.end();
+  });
+}
+
+// 2. RAW BODY CAPTURE FOR PAYSTACK HMAC VERIFICATION
 app.use('/api/webhook/paystack', express.json({
   verify: (req, res, buf) => {
     req.rawBody = buf; // Stores raw buffer for cryptographic comparison
@@ -30,43 +66,8 @@ app.use('/api/webhook/paystack', express.json({
 
 app.use(express.json());
 
-const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || 'sk_test_your_key_here';
-
 // ==========================================
-// 2. OUTBOUND POLLING & TASK SCHEDULER WORKER
-// ==========================================
-async function runOutboundPollingWorker() {
-  console.log('[Worker] Polling broader external endpoints for tasks...');
-  
-  // Simulated batch fetch from multiple partner APIs/endpoints
-  const fetchedBatch = [
-    { taskId: 'task_901', sector: 'logistics', value: 5000, targetUrl: 'https://api.partnerA.com/dispatch' }
-  ];
-
-  for (const task of fetchedBatch) {
-    try {
-      // Atomic Deduplication / Pre-Authorization Lock in Redis with Fallback Protection
-      const lockKey = `lock:task:${task.taskId}`;
-      const acquired = await redisClient.set(lockKey, 'pending', {
-        NX: true, // Only set if not already present
-        EX: 3600  // 1-hour expiration TTL for data minimization/cleanup
-      });
-
-      if (acquired) {
-        console.log(`[Worker] Task locked and staged for execution: ${task.taskId}`);
-      }
-    } catch (redisErr) {
-      console.warn(`⚠️ [Worker Notice] Redis operation skipped gracefully: ${redisErr.message}`);
-    }
-  }
-}
-
-// Run polling worker on a controlled execution interval (e.g., every 60 seconds)
-setInterval(runOutboundPollingWorker, 60000);
-
-
-// ==========================================
-// 3. SECURE WEBHOOK & METADATA-BOUND INGESTION
+// 3. SECURE WEBHOOK & REAL-WORLD FULFILLMENT
 // ==========================================
 app.post('/api/webhook/paystack', async (req, res) => {
   try {
@@ -90,12 +91,13 @@ app.post('/api/webhook/paystack', async (req, res) => {
 
     if (event.event === 'charge.success') {
       const paymentData = event.data;
-      const taskId = paymentData.metadata?.task_id;
+      const taskId = paymentData.metadata?.task_id || 'unknown';
+      const sector = paymentData.metadata?.sector || 'DelightPay Fulfillment';
       const reference = paymentData.reference;
+      const amountNGN = paymentData.amount / 100;
 
-      if (!taskId) {
+      if (!paymentData.metadata?.task_id) {
         console.error('[Error] Missing task_id metadata in transaction payload.');
-        return;
       }
 
       try {
@@ -114,15 +116,23 @@ app.post('/api/webhook/paystack', async (req, res) => {
         console.warn(`⚠️ [Webhook Notice] Redis state check bypassed: ${redisErr.message}`);
       }
 
-      // Execute Real-World Programmatic Fulfillment Task
-      console.log(`[Fulfillment Success] Task ${taskId} successfully executed and settled.`);
+      // Execute Real-World Fulfillment Log & Dispatch Real Telegram Alert
+      console.log(`[Fulfillment Success] Task ${taskId} successfully executed and settled. Ref: ${reference}`);
+      
+      await dispatchTelegramMessage(
+        `💰 🔊 *Real Paystack Webhook Verified (Success)*\n\n` +
+        `• *Task ID:* \`${taskId}\`\n` +
+        `• *Sector:* \`${sector}\`\n` +
+        `• *Settled Amount:* \`₦${amountNGN.toLocaleString()}\`\n` +
+        `• *Reference:* \`${reference}\``
+      );
     }
   } catch (error) {
     console.error('[Webhook Error]', error);
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Autonomous Outbound Engine running on port ${PORT}`);
 });
