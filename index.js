@@ -3,7 +3,7 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION CASCADING ECOSYSTEM
  * ============================================================================
  * File: index.js
- * Version: 9.0.3-Paystack-Dashboard-Retention
+ * Version: 9.0.4-Url-Safety-Patch
  * ============================================================================
  */
 
@@ -221,7 +221,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Industrial Cascading Ecosystem Engine',
-        version: '9.0.3-Paystack-Dashboard-Retention',
+        version: '9.0.4-Url-Safety-Patch',
         browserReady: metrics.browserReady,
         pendingTasksInQueue: pendingCount,
         walletBalanceUSD: walletData.accumulated_usd,
@@ -240,7 +240,7 @@ server.listen(PORT, async () => {
     console.log(`🌐 [Server] Master HTTP listener bound securely on port ${PORT}`);
     startSelfPingDaemon();
     
-    await dispatchTelegramMessage("🟢 *Industrial Ecosystem Engine Online (v9.0.3).* Strict Success Filtering & Dashboard Balance Retention Active.", false);
+    await dispatchTelegramMessage("🟢 *Industrial Ecosystem Engine Online (v9.0.4).* URL Safety Patch & Dashboard Balance Retention Active.", false);
     initializeBackgroundWorker();
 });
 
@@ -385,6 +385,12 @@ async function creditWalletAndCheckThreshold(task, earnedAmount) {
 // 8. COMPLIANT PLAYWRIGHT AUTOMATION ENGINE CORE
 // ==========================================
 async function executePlaywrightAutomation(task) {
+    // Robust validation safeguard against malformed tasks with missing or undefined URLs
+    if (!task || !task.target_url || typeof task.target_url !== 'string') {
+        console.log(`⚠️ [Skipped] Task ID: ${task?.id || 'unknown'} has an invalid or missing target_url.`);
+        return { success: false };
+    }
+
     if (!metrics.browserReady) {
         console.log(`⏳ [Worker] Browser still initializing. Retrying next cycle...`);
         return { success: false };
