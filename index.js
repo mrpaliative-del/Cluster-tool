@@ -3,7 +3,7 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION LOCAL FILE DAEMON
  * ============================================================================
  * File: index.js
- * Version: 5.2.8-Production-Zero-Starvation-RateLimited
+ * Version: 5.2.9-Production-Zero-Starvation-Paced
  * Architecture: Local JSON File Queue (`tasks.json`) + BullMQ + 
  * Playwright Headless Automation + Paystack Webhook Settlement & KeepAlive.
  * ============================================================================
@@ -22,7 +22,7 @@ const IORedis = require('ioredis');
 // 1. CONFIGURATION & ENVIRONMENT SETUP
 // ==========================================
 const PORT = process.env.PORT || 10000;
-const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 15000; // Defaults cleanly to 15s
+const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 15000; // Paced to 15s default
 const AFFILIATE_MARKER = process.env.AFFILIATE_MARKER || 'global_cluster_master_01';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
 const TASKS_FILE = path.join(__dirname, 'tasks.json');
@@ -140,7 +140,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Local JSON File Task Execution Engine (Zero-Starvation Autonomous Cluster)',
-        version: '5.2.8-Production-Zero-Starvation-RateLimited',
+        version: '5.2.9-Production-Zero-Starvation-Paced',
         marker: AFFILIATE_MARKER,
         metrics: {
             ...metrics,
@@ -193,7 +193,6 @@ function dispatchTelegramMessage(message, disableNotification = false) {
         }
 
         const now = Date.now();
-        // Prevent spamming the API by enforcing a time gap between non-silent alerts
         if (!disableNotification && (now - lastTelegramAlertTime < TELEGRAM_COOLDOWN_MS)) {
             console.log('📱 [Telegram] Alert throttled by cooldown guard to prevent 429 limits.');
             return resolve(false);
@@ -478,7 +477,7 @@ async function fetchAndRouteNextTask() {
 }
 
 // ==========================================
-// 8. INDUSTRIAL AUTONOMOUS DAEMON ENGINE LOOP
+// 8. INDUSTRIAL AUTONOMOUS DAEMON ENGINE LOOP (PACED)
 // ==========================================
 async function startAutonomousDaemon() {
     console.log(`🚀 [Daemon] Local file zero-starvation task polling loop started (Interval: ${POLL_INTERVAL_MS}ms)`);
@@ -490,13 +489,12 @@ async function startAutonomousDaemon() {
 
             if (!dispatched) {
                 process.stdout.write('.');
-            } else {
-                continue;
             }
         } catch (daemonErr) {
             console.error(`⚠️ [Daemon Loop Exception Warning]:`, daemonErr.message);
         }
 
+        // Always pace the loop with the interval delay to protect system resources and avoid flooding
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
     }
 }
