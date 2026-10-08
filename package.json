@@ -4,8 +4,7 @@
   "description": "Autonomous outbound-driven task processing and payment verification engine",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "postinstall": "npx playwright install chromium"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.19.2",
