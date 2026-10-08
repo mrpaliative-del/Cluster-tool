@@ -454,5 +454,29 @@ async function startAutonomousDaemon() {
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
     }
 }
+// ==========================================
+// SELF-PING KEEPALIVE DAEMON (Prevents Cold Starts)
+// ==========================================
+function startSelfPingDaemon() {
+    const PING_INTERVAL_MS = 10 * 60 * 1000; // Ping every 10 minutes
+    const targetUrl = `http://localhost:${PORT}/`;
+
+    setInterval(() => {
+        http.get(targetUrl, (res) => {
+            // Consume response data to free up memory
+            res.on('data', () => {});
+            res.on('end', () => {
+                console.log(`💓 [KeepAlive] Self-ping successful (Status: ${res.statusCode})`);
+            });
+        }).on('err', (err) => {
+            console.error(`⚠️ [KeepAlive Error]:`, err.message);
+        });
+    }, PING_INTERVAL_MS);
+
+    console.log(`🛡️ [KeepAlive] Internal self-ping daemon initialized (Interval: 10 mins)`);
+}
+
+// Call this right after starting your server or daemon
+startSelfPingDaemon();
 
 startAutonomousDaemon();
