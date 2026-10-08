@@ -15,6 +15,19 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 const AFFILIATE_MARKER = process.env.TRAVELPAYOUTS_MARKER || 'default_marker';
 
 // ==========================================
+// GLOBAL & REGIONAL ROUTE MATRIX
+// ==========================================
+const GLOBAL_ROUTE_MATRIX = [
+  { route: 'LOS0112ABV1', value: 85, region: 'Domestic (Lagos - Abuja)' },
+  { route: 'LOS1012ACC1', value: 120, region: 'Regional (Lagos - Accra)' },
+  { route: 'LOS1512JNB1', value: 210, region: 'Continental (Lagos - Johannesburg)' },
+  { route: 'LOS2012LHR1', value: 350, region: 'Intercontinental (Lagos - London)' },
+  { route: 'LOS2212DXB1', value: 320, region: 'Intercontinental (Lagos - Dubai)' },
+  { route: 'ABV2512IST1', value: 290, region: 'Intercontinental (Abuja - Istanbul)' },
+  { route: 'LOS0512JFK1', value: 450, region: 'Intercontinental (Lagos - New York)' }
+];
+
+// ==========================================
 // LOCAL PERSISTENCE STORAGE LAYER
 // ==========================================
 const STORAGE_FILE = path.join(__dirname, 'cluster_state.json');
@@ -60,7 +73,7 @@ async function storePop() {
   return item; 
 }
 
-// TELEGRAM TELEMETRY ALERT DISPATCHER (Enhanced)
+// TELEGRAM TELEMETRY ALERT DISPATCHER
 async function sendTelegramAlert(title, task, result) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
   
@@ -149,16 +162,13 @@ async function runAutonomousDiscovery() {
       }
     }
   } catch (err) {
-    console.warn(`⚠️ [Discovery Notice] Public network sweep restricted on cloud IP. Switching to high-yield route matrix.`);
+    console.warn(`⚠️ [Discovery Notice] Public network sweep restricted on cloud IP. Switching to global route matrix.`);
   }
 
-  // Guaranteed resilient fallback: Generates high-intent travel route targets if public scrape is restricted
-  if (discoveredCount === 0 && localData.queue.length < 20) {
-    const robustRoutes = [
-      'LOS0112ABV1', 'LOS2012LHR1', 'LOS1512JNB1', 'ABV1012LOS1'
-    ];
-    const randomRoute = robustRoutes[Math.floor(Math.random() * robustRoutes.length)];
-    const fallbackUrl = `https://www.aviasales.com/search/${randomRoute}?marker=${AFFILIATE_MARKER}`;
+  // Guaranteed resilient fallback: Pulls from expanded global route matrix
+  if (discoveredCount === 0 && localData.queue.length < 25) {
+    const selectedMatrix = GLOBAL_ROUTE_MATRIX[Math.floor(Math.random() * GLOBAL_ROUTE_MATRIX.length)];
+    const fallbackUrl = `https://www.aviasales.com/search/${selectedMatrix.route}?marker=${AFFILIATE_MARKER}`;
 
     const exists = localData.queue.some(item => item.includes(fallbackUrl));
     if (!exists) {
@@ -168,10 +178,10 @@ async function runAutonomousDiscovery() {
         type: 'affiliate_arbitrage_audit',
         targetUrl: fallbackUrl,
         requiredMarker: AFFILIATE_MARKER,
-        estimatedValueUSD: 95,
+        estimatedValueUSD: selectedMatrix.value,
         timestamp: Date.now()
       }));
-      console.log(`🚀 [Discovery Engine] Injected high-yield flight route: ${randomRoute}`);
+      console.log(`🚀 [Discovery Engine] Injected [${selectedMatrix.region}] route: ${selectedMatrix.route} ($${selectedMatrix.value})`);
     }
   }
 
@@ -180,7 +190,7 @@ async function runAutonomousDiscovery() {
 }
 
 // ==========================================
-// PLAYWRIGHT HEADLESS WORKER ENGINE
+// PLAYWRIGHT HEADLESS WORKER ENGINE (CONCURRENT)
 // ==========================================
 let sharedBrowser = null;
 async function getSharedBrowser() {
@@ -223,17 +233,17 @@ async function auditArbitrageTarget(task, page) {
   };
 }
 
-async function runArbitrageWorker() {
+async function runArbitrageWorker(workerId) {
   let context = null;
   try {
     let rawTask = await storePop();
     if (!rawTask) {
-      setTimeout(runArbitrageWorker, 5000);
+      setTimeout(() => runArbitrageWorker(workerId), 4000);
       return;
     }
 
     const task = JSON.parse(rawTask);
-    console.log(`🔎 [Worker] Headless audit running on: ${task.targetUrl}`);
+    console.log(`🔎 [Worker #${workerId}] Headless audit running on: ${task.targetUrl}`);
     
     const browser = await getSharedBrowser();
     context = await browser.newContext({
@@ -245,23 +255,24 @@ async function runArbitrageWorker() {
     await context.close();
 
     if (!result.success) {
-      console.warn(`💰 [Monetary Leak Identified!] Risk on ${task.targetUrl} ($${task.estimatedValueUSD})`);
+      console.warn(`💰 [Worker #${workerId}] Monetary Leak Identified on ${task.targetUrl} ($${task.estimatedValueUSD})`);
       await sendTelegramAlert('Monetary Leakage / Arbitrage Alert', task, result);
     } else {
-      console.log(`✅ [Route Secured] Tracking marker intact. Value protected: $${task.estimatedValueUSD}`);
+      console.log(`✅ [Worker #${workerId}] Route Secured. Value protected: $${task.estimatedValueUSD}`);
     }
 
   } catch (err) {
     if (context) { try { await context.close(); } catch (e) {} }
-    console.error('❌ [Worker Exception]', err.message);
+    console.error(`❌ [Worker #${workerId} Exception]`, err.message);
   }
 
-  setTimeout(runArbitrageWorker, 2000);
+  setTimeout(() => runArbitrageWorker(workerId), 2000);
 }
 
-// Boot background headless processes
+// Boot background headless processes (Discovery + 2 Concurrent Workers)
 setTimeout(runAutonomousDiscovery, 3000);
-setTimeout(runArbitrageWorker, 6000);
+setTimeout(() => runArbitrageWorker(1), 5000);
+setTimeout(() => runArbitrageWorker(2), 7000);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
