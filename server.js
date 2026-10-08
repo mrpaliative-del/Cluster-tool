@@ -284,15 +284,6 @@ setTimeout(runAutonomousDiscovery, 3000);
 setTimeout(() => runArbitrageWorker(1), 5000);
 setTimeout(() => runArbitrageWorker(2), 7000);
 
-// Immediate startup test ping to verify Telegram connectivity
-setTimeout(async () => {
-  await sendTelegramAlert(
-    'Cluster Online & Telemetry Active', 
-    { targetUrl: 'https://cluster-tool.onrender.com' }, 
-    { success: true, finalStatus: 200, markerSurvived: true, hopCount: 1, estimatedValueUSD: 0 }
-  );
-}, 4000);
-
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Autonomous Headless Arbitrage Cluster active on port ${PORT}`);
