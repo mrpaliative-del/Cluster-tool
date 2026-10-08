@@ -3,7 +3,7 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION CASCADING ECOSYSTEM
  * ============================================================================
  * File: index.js
- * Version: 9.0.2-OPay-Production-Ready
+ * Version: 9.0.3-Paystack-Dashboard-Retention
  * ============================================================================
  */
 
@@ -21,7 +21,7 @@ const PORT = process.env.PORT || 10000;
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 15000;
 const AFFILIATE_MARKER = process.env.AFFILIATE_MARKER || 'global_cluster_master_01';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
-const OPAY_RECIPIENT_CODE = process.env.OPAY_RECIPIENT_CODE || ''; // Locked-in OPay recipient code (RCP_...)
+const OPAY_RECIPIENT_CODE = process.env.OPAY_RECIPIENT_CODE || ''; // Reserved for post-CAC upgrade
 const TASKS_FILE = path.join(__dirname, 'tasks.json');
 const WALLET_FILE = path.join(__dirname, 'wallet.json');
 const WITHDRAWAL_THRESHOLD_USD = 5.00;
@@ -138,7 +138,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // Direct Server-to-Server Transaction Initialization Endpoint (Eliminates Abandoned Modal Drops)
+    // Direct Server-to-Server Transaction Initialization Endpoint
     if (req.method === 'POST' && pathname === '/initialize-transaction') {
         let body = '';
         req.on('data', chunk => { body += chunk; });
@@ -173,7 +173,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // Paystack Webhook Handler (DelightPay Fulfillment & Status Tracking)
+    // Paystack Webhook Handler (Strict Success Filtering - Ignores Abandoned Transactions)
     if (req.method === 'POST' && pathname === '/webhook/paystack') {
         let body = '';
         req.on('data', chunk => { body += chunk; });
@@ -189,14 +189,22 @@ const server = http.createServer(async (req, res) => {
                 res.end(JSON.stringify({ status: 'received' }));
 
                 const event = JSON.parse(body);
+                
+                // STRICT CHECK: Only process verified successful charges
                 if (event.event === 'charge.success') {
                     const data = event.data;
+                    
+                    if (data.status !== 'success') {
+                        console.log(`⚠️ [Webhook Ignored] Transaction status is '${data.status}', not strictly success.`);
+                        return;
+                    }
+
                     const metadata = data.metadata || {};
-                    console.log(`✅ [Webhook Success] Charge verified! Ref: ${data.reference}, Amount: ₦${data.amount / 100}`);
+                    console.log(`✅ [Webhook Success] Verified successful charge! Ref: ${data.reference}, Amount: ₦${data.amount / 100}`);
                     await sendWebhookAlert(metadata.task_id || 'unknown', data.amount / 100, data.reference, metadata.sector || 'DelightPay Fulfillment');
-                } else if (event.event === 'charge.abandoned') {
-                    const data = event.data;
-                    console.log(`⚠️ [Webhook Notice] Transaction abandoned: ${data.reference}`);
+                } else {
+                    // Log and completely skip abandoned, failed, or pending events
+                    console.log(`ℹ️ [Webhook Notice] Event '${event.event}' received and bypassed (No wallet credit).`);
                 }
             } catch (err) {
                 console.error('⚠️ [Webhook Error]:', err.message);
@@ -213,7 +221,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Industrial Cascading Ecosystem Engine',
-        version: '9.0.2-OPay-Production-Ready',
+        version: '9.0.3-Paystack-Dashboard-Retention',
         browserReady: metrics.browserReady,
         pendingTasksInQueue: pendingCount,
         walletBalanceUSD: walletData.accumulated_usd,
@@ -232,7 +240,7 @@ server.listen(PORT, async () => {
     console.log(`🌐 [Server] Master HTTP listener bound securely on port ${PORT}`);
     startSelfPingDaemon();
     
-    await dispatchTelegramMessage("🟢 *Industrial Ecosystem Engine Online (v9.0.2).* Direct API Initialization & Autonomous Payout Pipeline Active.", false);
+    await dispatchTelegramMessage("🟢 *Industrial Ecosystem Engine Online (v9.0.3).* Strict Success Filtering & Dashboard Balance Retention Active.", false);
     initializeBackgroundWorker();
 });
 
@@ -313,18 +321,16 @@ function sendTaskAlert(task, payoutAmount, currentBalance) {
     return dispatchTelegramMessage(message, false);
 }
 
-function sendWithdrawalAlert(amountUsd, ngnValue, transferReference) {
-    const message = `💸 🔊 *OPAY PAYOUT DISPATCHED VIA PAYSTACK!*\n\n` +
-                    `• *Threshold Reached:* \`$${amountUsd.toFixed(2)} USD\`\n` +
-                    `• *Converted Value:* \`₦${ngnValue.toLocaleString()} NGN\`\n` +
-                    `• *Destination:* \`OPay (Metilelu Ayodele Adetayo)\`\n` +
-                    `• *Reference:* \`${transferReference || 'Initiated'}\`\n` +
-                    `• *Status:* \`Transfer Request Executed Successfully 🚀\``;
+function sendRetentionAlert(amountUsd, ngnValue) {
+    const message = `💰 🔊 *THRESHOLD REACHED & RETAINED IN PAYSTACK!* \n\n` +
+                    `• *Amount:* \`$${amountUsd.toFixed(2)} USD\` (\`₦${ngnValue.toLocaleString()} NGN\`)\n` +
+                    `• *Destination:* \`Paystack Dashboard Balance\`\n` +
+                    `• *Status:* \`Held securely pending business compliance upgrade 🛡️\``;
     return dispatchTelegramMessage(message, false);
 }
 
 function sendWebhookAlert(taskId, amountNGN, reference, sector) {
-    const message = `💰 🔊 *Paystack Gateway Webhook Verified!*\n\n` +
+    const message = `💰 🔊 *Paystack Gateway Webhook Verified (Success)*\n\n` +
                     `• *Task ID:* \`${taskId}\`\n` +
                     `• *Sector:* \`${sector}\`\n` +
                     `• *Settled Amount:* \`₦${amountNGN.toLocaleString()}\`\n` +
@@ -333,69 +339,14 @@ function sendWebhookAlert(taskId, amountNGN, reference, sector) {
 }
 
 // ==========================================
-// 6. PAYSTACK TRANSFER API (OPAY SETTLEMENT)
+// 6. PAYSTACK DASHBOARD BALANCE ACCUMULATION
 // ==========================================
-function executeOPayTransfer(amountUsd) {
-    return new Promise((resolve) => {
-        if (!PAYSTACK_SECRET_KEY || !OPAY_RECIPIENT_CODE) {
-            console.error(`❌ [Paystack Transfer Error]: Missing secret key or OPay recipient code.`);
-            dispatchTelegramMessage(`⚠️ *Payout Failed:* Missing Paystack secret key or OPay recipient code configuration.`, true);
-            return resolve(false);
-        }
-
+function handleDashboardBalanceAccumulation(amountUsd) {
+    return new Promise(async (resolve) => {
         const ngnValue = Math.round(amountUsd * 1500);
-        const amountInKobo = ngnValue * 100;
-        const reference = `opay_auto_${Date.now()}`;
-
-        const postData = JSON.stringify({
-            source: 'balance',
-            amount: amountInKobo,
-            recipient: OPAY_RECIPIENT_CODE,
-            reason: 'Autonomous Task Engine OPay Settlement'
-        });
-
-        const options = {
-            hostname: 'api.paystack.co',
-            port: 443,
-            path: '/transfer',
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${PAYSTACK_SECRET_KEY}`,
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(postData)
-            }
-        };
-
-        const req = https.request(options, (res) => {
-            let body = '';
-            res.on('data', chunk => body += chunk);
-            res.on('end', async () => {
-                try {
-                    const responseJson = JSON.parse(body);
-                    if (res.statusCode === 200 && responseJson.status) {
-                        console.log(`🚀 [Paystack Transfer Success] Dispatched ₦${ngnValue.toLocaleString()} to OPay. Ref: ${reference}`);
-                        await sendWithdrawalAlert(amountUsd, ngnValue, reference);
-                        resolve(true);
-                    } else {
-                        console.error(`❌ [Paystack Transfer API Error]:`, body);
-                        await dispatchTelegramMessage(`⚠️ *OPay Payout API Error*\n\nResponse: \`${body.slice(0, 100)}\``, true);
-                        resolve(false);
-                    }
-                } catch (err) {
-                    console.error(`❌ [Paystack Transfer Parse Error]:`, err.message);
-                    resolve(false);
-                }
-            });
-        });
-
-        req.on('error', async (err) => {
-            console.error(`❌ [Paystack Network Error]:`, err.message);
-            await dispatchTelegramMessage(`⚠️ *OPay Network Error:* ${err.message}`, true);
-            resolve(false);
-        });
-
-        req.write(postData);
-        req.end();
+        console.log(`💰 [Dashboard Retention] ₦${ngnValue.toLocaleString()} retained safely in Paystack balance (Awaiting CAC/Business upgrade).`);
+        await sendRetentionAlert(amountUsd, ngnValue);
+        resolve(true);
     });
 }
 
@@ -414,17 +365,15 @@ async function creditWalletAndCheckThreshold(task, earnedAmount) {
     console.log(`💰 [Wallet Credited] Task ${task.id} added $${earnedAmount.toFixed(2)}. Balance: $${currentBalance.toFixed(2)}`);
 
     if (currentBalance >= WITHDRAWAL_THRESHOLD_USD) {
-        console.log(`🚀 [Threshold Reached] Balance ($${currentBalance.toFixed(2)}) meets $5.00 requirement. Executing Paystack OPay transfer...`);
+        console.log(`🚀 [Threshold Reached] Balance ($${currentBalance.toFixed(2)}) meets $5.00 requirement. Retaining in Paystack dashboard...`);
         
         const balanceToWithdraw = currentBalance;
-        const transferSuccess = await executeOPayTransfer(balanceToWithdraw);
+        const retentionSuccess = await handleDashboardBalanceAccumulation(balanceToWithdraw);
 
-        if (transferSuccess) {
+        if (retentionSuccess) {
             wallet.total_withdrawn_usd += balanceToWithdraw;
             wallet.accumulated_usd = 0.0;
             wallet.payouts_count += 1;
-        } else {
-            console.error(`⚠️ [Payout Deferred] Transfer attempt failed. Retaining balance for next cycle retry.`);
         }
     }
 
