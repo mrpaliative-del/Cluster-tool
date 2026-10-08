@@ -3,9 +3,23 @@ const crypto = require('crypto');
 const Redis = require('redis');
 
 const app = express();
-const redisClient = Redis.createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
 
-redisClient.connect().catch(console.error);
+// Sanitize REDIS_URL to remove hidden invisible Unicode characters (e.g., LTR marks) or whitespace
+const rawRedisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const sanitizedRedisUrl = rawRedisUrl.replace(/^[\s\u200e\u200f\u202a-\u202e]+/, '').trim();
+
+const redisClient = Redis.createClient({ 
+  url: sanitizedRedisUrl,
+  socket: {
+    tls: sanitizedRedisUrl.startsWith('rediss://'),
+    rejectUnauthorized: false
+  }
+});
+
+redisClient.on('error', (err) => console.error('[Redis Client Error]', err));
+redisClient.connect().then(() => {
+  console.log('[Redis] Connected successfully to state store.');
+}).catch(console.error);
 
 // 1. RAW BODY CAPTURE FOR PAYSTACK HMAC VERIFICATION
 // Essential: Must capture raw bytes before json parsing to avoid signature failure.
@@ -20,7 +34,6 @@ app.use(express.json());
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || 'sk_test_your_key_here';
 
 // ==========================================
-lib
 // 2. OUTBOUND POLLING & TASK SCHEDULER WORKER
 // ==========================================
 async function runOutboundPollingWorker() {
@@ -41,7 +54,6 @@ async function runOutboundPollingWorker() {
 
     if (acquired) {
       console.log(`[Worker] Task locked and staged for execution: ${task.taskId}`);
-      // Here you can programmatically register internal pre-requisites or trigger downstream queues
     }
   }
 }
