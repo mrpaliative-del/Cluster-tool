@@ -17,15 +17,25 @@ const redisClient = Redis.createClient({
   }
 });
 
-redisClient.on('error', (err) => console.error('[Redis Client Error - Non-Fatal]', err.message));
+let redisDegraded = false;
+
+redisClient.on('error', (err) => {
+  if (err.message && (err.message.includes('max requests limit exceeded') || err.message.includes('OOM'))) {
+    redisDegraded = true;
+  }
+  console.error('[Redis Client Error]', err.message);
+});
+
 redisClient.connect().then(() => {
   console.log('[Redis] Connected successfully to state store.');
-}).catch(err => console.error('[Redis Connection Warning - Operating in Memory Fallback Mode]', err.message));
+}).catch(err => {
+  redisDegraded = true;
+  console.error('[Redis Connection Warning - Operating in Memory Fallback Mode]', err.message);
+});
 
 // ==========================================
 // RESILIENT IN-MEMORY FALLBACK LAYER
 // ==========================================
-let redisDegraded = false;
 const memoryQueue = [];
 const memoryState = new Map();
 
@@ -34,7 +44,7 @@ async function safeRedisGet(key) {
   try {
     return await redisClient.get(key);
   } catch (err) {
-    if (err.message && err.message.includes('max requests limit exceeded')) redisDegraded = true;
+    redisDegraded = true;
     return memoryState.get(key) || null;
   }
 }
@@ -45,7 +55,7 @@ async function safeRedisSet(key, val) {
   try {
     await redisClient.set(key, val);
   } catch (err) {
-    if (err.message && err.message.includes('max requests limit exceeded')) redisDegraded = true;
+    redisDegraded = true;
   }
 }
 
@@ -57,7 +67,7 @@ async function safeRedisPush(queueName, payload) {
   try {
     return await redisClient.rPush(queueName, payload);
   } catch (err) {
-    if (err.message && err.message.includes('max requests limit exceeded')) redisDegraded = true;
+    redisDegraded = true;
     memoryQueue.push(payload);
     return memoryQueue.length;
   }
@@ -68,7 +78,7 @@ async function safeRedisPop(queueName) {
   try {
     return await redisClient.lPop(queueName);
   } catch (err) {
-    if (err.message && err.message.includes('max requests limit exceeded')) redisDegraded = true;
+    redisDegraded = true;
     return memoryQueue.shift() || null;
   }
 }
@@ -221,21 +231,26 @@ async function auditRedirectChain(task, page) {
 // Pillar 2: Programmatic SEO & OpenGraph Tag Drift Verification
 async function auditOpenGraphTags(task, page) {
   const response = await page.goto(task.targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-  const metaTags = await page.evaluate(() => {
+  
+  // FIXED: Evaluated safely inside browser DOM context
+  const evaluation = await page.evaluate(() => {
     const tags = {};
     document.querySelectorAll('meta').forEach(meta => {
       const prop = meta.getAttribute('property') || meta.getAttribute('name');
       const content = meta.getAttribute('content');
       if (prop) tags[prop] = content;
     });
-    return tags;
+    return {
+      metaTags: tags,
+      pageTitle: document.title || ''
+    };
   });
 
-  const hasOgImage = !!metaTags['og:image'];
-  const hasTitle = !!metaTags['og:title'] || !!document.title;
+  const hasOgImage = !!evaluation.metaTags['og:image'];
+  const hasTitle = !!evaluation.metaTags['og:title'] || !!evaluation.pageTitle;
   const isHealthy = hasOgImage && hasTitle;
 
-  return { success: isHealthy, type: 'seo_og_drift', status: response ? response.status() : 0, metaTags, hasOgImage, hasTitle };
+  return { success: isHealthy, type: 'seo_og_drift', status: response ? response.status() : 0, metaTags: evaluation.metaTags, hasOgImage, hasTitle };
 }
 
 // Pillar 3: Mixed Content & Secure Asset Compliance Scans
@@ -280,7 +295,7 @@ async function executeTaskRouter(task, page) {
 }
 
 // ==========================================
-// AUTONOMOUS HIGH-VELOCITY TASK FEEDER
+// AUTONOMOUS TASK FEEDER (Optimized Interval)
 // ==========================================
 async function runSelfDiscoveryFeeder() {
   try {
@@ -292,7 +307,7 @@ async function runSelfDiscoveryFeeder() {
         const xmlText = await res.text();
         const matches = xmlText.match(/<loc>(.*?)<\/loc>/g);
         if (matches) {
-          discoveredUrls = matches.map(m => m.replace(/<\/?loc>/g, '')).slice(0, 10);
+          discoveredUrls = matches.map(m => m.replace(/<\/?loc>/g, '')).slice(0, 5);
         }
       } catch (e) {}
     }
@@ -306,7 +321,7 @@ async function runSelfDiscoveryFeeder() {
 
     for (const url of discoveredUrls) {
       const task = {
-        batchId: `auto_high_vel_${Date.now()}`,
+        batchId: `auto_feeder_${Date.now()}`,
         taskId: `auto_${Math.random().toString(36).substring(7)}`,
         type: url.includes('checkout') ? 'widget_liveness' : 'seo_og_drift',
         targetUrl: url,
@@ -320,7 +335,8 @@ async function runSelfDiscoveryFeeder() {
     console.error('❌ [Autonomous Feeder Error]', err.message);
   }
 
-  setTimeout(runSelfDiscoveryFeeder, 10 * 1000);
+  // Adjusted to 60 seconds to protect API and Redis request limits
+  setTimeout(runSelfDiscoveryFeeder, 60 * 1000);
 }
 
 // WORKER SPOOLER LOOP
@@ -329,7 +345,7 @@ async function runAuditSpooler() {
   try {
     let rawTask = await safeRedisPop('tasks:verified_queue');
     if (!rawTask) {
-      setTimeout(runAuditSpooler, 2000);
+      setTimeout(runAuditSpooler, 3000);
       return;
     }
 
@@ -361,17 +377,16 @@ async function runAuditSpooler() {
   } catch (err) {
     if (context) { try { await context.close(); } catch (e) {} }
     console.error('❌ [Worker Execution Error]', err.message);
-    await sendTelegramAlert(`❌ *Worker Execution Error*\n\`${err.message}\``);
   }
 
-  setTimeout(runAuditSpooler, 500);
+  setTimeout(runAuditSpooler, 1000);
 }
 
 // Kick off autonomous loops on boot
-setTimeout(runSelfDiscoveryFeeder, 3000);
-setTimeout(runAuditSpooler, 1000);
+setTimeout(runSelfDiscoveryFeeder, 5000);
+setTimeout(runAuditSpooler, 2000);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`High-Velocity Autonomous Compliance Cluster with Telegram active on port ${PORT}`);
+  console.log(`Autonomous Compliance Cluster active on port ${PORT}`);
 });
