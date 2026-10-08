@@ -25,6 +25,7 @@ redisClient.connect().then(() => {
 
 // 1. CONFIG & TELEMETRY SETUP
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
+const CLUSTER_SECRET = process.env.CLUSTER_SECRET || 'your-cluster-hmac-secret';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 
@@ -41,7 +42,7 @@ const systemMetrics = {
 // Feature 7: Smart Circuit Breaker Registry
 const circuitBreakers = {};
 
-// Feature 8: Interactive Telegram Inline-Action Controls Support
+// Feature 8: Interactive Telegram Controls Support
 function dispatchTelegramMessage(message, includeInlineKeyboard = false) {
   return new Promise((resolve) => {
     if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return resolve(false);
@@ -99,7 +100,7 @@ app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
     service: 'Autonomous Outbound & Optimized Task Spooler',
-    architecture: 'Native Monolithic Node.js/Playwright + Real-Time Event-Driven Engine',
+    architecture: 'Native Monolithic Node.js/Playwright + Cryptographic Gating',
     timestamp: new Date().toISOString()
   });
 });
@@ -137,25 +138,6 @@ app.get('/api/metrics', async (req, res) => {
   }
 });
 
-app.get('/api/wallet/status', async (req, res) => {
-  try {
-    const balanceUSD = parseFloat(await redisClient.get('wallet:balance_usd').catch(() => '0.00') || '0.00');
-    const thresholdTarget = 5.00;
-    const remainingToThreshold = Math.max(0, thresholdTarget - balanceUSD);
-
-    res.status(200).json({
-      success: true,
-      walletBalanceUSD: balanceUSD,
-      walletBalanceNGN: balanceUSD * 1500,
-      thresholdTargetUSD: thresholdTarget,
-      remainingToThresholdUSD: Number(remainingToThreshold.toFixed(2)),
-      thresholdReached: balanceUSD >= thresholdTarget
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Status check degraded', details: err.message });
-  }
-});
-
 app.get('/api/tasks/flush', async (req, res) => {
   try {
     await redisClient.del('tasks:verified_queue');
@@ -165,9 +147,32 @@ app.get('/api/tasks/flush', async (req, res) => {
   }
 });
 
-// 4. TASK INGESTION ENDPOINT
+// 4. TASK INGESTION ENDPOINT WITH CRYPTOGRAPHIC TOKEN VERIFICATION
 app.post('/api/tasks/submit', async (req, res) => {
   try {
+    const clientToken = req.headers['x-cluster-token'];
+    if (!clientToken) {
+      return res.status(403).json({ error: 'Access Denied: Missing cryptographic client token.' });
+    }
+
+    // Stateless Token Validation using HMAC-SHA512
+    const [encodedPayload, clientSignature] = clientToken.split('.');
+    if (!encodedPayload || !clientSignature) {
+      return res.status(403).json({ error: 'Access Denied: Malformed token structure.' });
+    }
+
+    const payloadString = Buffer.from(encodedPayload, 'base64').toString('utf8');
+    const expectedSignature = crypto.createHmac('sha512', CLUSTER_SECRET).update(payloadString).digest('hex');
+
+    if (!crypto.timingSafeEqual(Buffer.from(expectedSignature, 'hex'), Buffer.from(clientSignature, 'hex'))) {
+      return res.status(403).json({ error: 'Access Denied: Invalid cryptographic token signature.' });
+    }
+
+    const tokenPayload = JSON.parse(payloadString);
+    if (Date.now() > tokenPayload.exp) {
+      return res.status(403).json({ error: 'Access Denied: Subscription token has expired.' });
+    }
+
     const { tasks } = req.body;
     const taskList = Array.isArray(tasks) ? tasks : [req.body];
 
@@ -202,7 +207,6 @@ app.post('/api/tasks/submit', async (req, res) => {
 
     console.log(`📥 [Verified Ingest] Successfully queued ${taskList.length} legit paid tasks.`);
     
-    // Immediately wake up the spooler to process real tasks right away
     clearTimeout(adaptiveTimer);
     adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 500);
 
@@ -214,8 +218,26 @@ app.post('/api/tasks/submit', async (req, res) => {
 });
 
 // ==========================================
-// 5. PLAYWRIGHT AUTOMATION ENGINE
+// 5. OPTIMIZED PLAYWRIGHT AUTOMATION ENGINE
 // ==========================================
+
+let sharedBrowser = null;
+
+async function getSharedBrowser() {
+  if (!sharedBrowser || !sharedBrowser.isConnected()) {
+    sharedBrowser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu'
+      ]
+    });
+  }
+  return sharedBrowser;
+}
 
 async function executePlaywrightTask(task) {
   if (circuitBreakers[task.targetUrl] && Date.now() < circuitBreakers[task.targetUrl]) {
@@ -223,50 +245,49 @@ async function executePlaywrightTask(task) {
     return { success: true, targetTitle: 'Quarantined Endpoint Bypassed Safely' };
   }
 
-  let browser;
+  let context;
   try {
-    console.log(`🤖 [Playwright Worker] Executing verified task: ${task.taskId} [${task.sector}] ->${task.targetUrl}`);
+    console.log(`🤖 [Optimized Worker] Executing verified task: ${task.taskId} ->${task.targetUrl}`);
     
-    browser = await chromium.launch({ 
-      headless: true, 
-      args: [
-        '--no-sandbox', 
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-blink-features=AutomationControlled'
-      ] 
-    });
-
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      viewport: { width: 1366, height: 768 },
-    });
-
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    const browser = await getSharedBrowser();
+    context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     });
 
     const page = await context.newPage();
-    
-    await page.goto(task.targetUrl, { timeout: 25000, waitUntil: 'commit' });
-    const targetTitle = await page.title() || 'Verified Target';
-    
-    const pageContent = await page.content();
-    if (!pageContent || pageContent.length < 10) {
-      throw new Error('DOM Heuristic Fingerprint validation failed.');
+
+    // Aggressive Resource Blocking for Maximum Velocity & Low Memory Footprint
+    await page.route('**/*', (route) => {
+      const type = route.request().resourceType();
+      if (['image', 'stylesheet', 'font', 'media'].includes(type)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
+
+    // Strict 6-Second Navigation Timeout Guard
+    const response = await page.goto(task.targetUrl, {
+      waitUntil: 'commit',
+      timeout: 6000
+    });
+
+    const statusCode = response ? response.status() : 0;
+    if (statusCode < 200 || statusCode >= 400) {
+      throw new Error(`HTTP Status Failure Code: ${statusCode}`);
     }
 
-    console.log(`🔍 [Task Settled] Target Title: "${targetTitle}"`);
-    await browser.close();
-    
+    const targetTitle = await page.title() || 'Verified Target';
+    console.log(`🔍 [Task Settled] Target Title: "${targetTitle}" (Status: ${statusCode})`);
+
+    await context.close();
     delete circuitBreakers[task.targetUrl];
     return { success: true, targetTitle };
 
   } catch (error) {
     console.error(`❌ [Playwright Error Isolated] Task ${task.taskId} failed:`, error.message);
-    if (browser) {
-      try { await browser.close(); } catch (e) {}
+    if (context) {
+      try { await context.close(); } catch (e) {}
     }
 
     circuitBreakers[task.targetUrl] = Date.now() + (5 * 60 * 1000);
@@ -295,7 +316,6 @@ async function runVerifiedTaskSpooler() {
     const batchSize = 2;
     const batchTasks = [];
 
-    // Pull real tasks from Redis queue
     for (let i = 0; i < batchSize; i++) {
       try {
         let rawTask = await redisClient.lPop('tasks:verified_queue');
@@ -306,15 +326,14 @@ async function runVerifiedTaskSpooler() {
       }
     }
 
-    // If queue is empty, do NOT run fake heartbeats. Go into efficient idle mode.
     if (batchTasks.length === 0) {
       console.log(`💤 [Queue Idle] No pending tasks in queue. Standing by for ingestion or webhook events...`);
       clearTimeout(adaptiveTimer);
-      adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 60000); // Check every minute quietly
+      adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 60000);
       return;
     }
 
-    console.log(`📦 [Bulk Verified Spooler] Processing batch of ${batchTasks.length} real tasks...`);
+    console.log(`📦 [Bulk Optimized Spooler] Processing batch of ${batchTasks.length} real tasks...`);
 
     for (const task of batchTasks) {
       try {
@@ -340,7 +359,6 @@ async function runVerifiedTaskSpooler() {
       }
     }
 
-    // Continue processing if more items remain in queue
     const remainingQueue = await redisClient.lLen('tasks:verified_queue').catch(() => 0);
     const nextCadence = remainingQueue > 0 ? 5000 : 60000;
 
@@ -354,7 +372,6 @@ async function runVerifiedTaskSpooler() {
   }
 }
 
-// Start spooler loop on boot
 setTimeout(runVerifiedTaskSpooler, 3000);
 
 
@@ -425,5 +442,5 @@ app.post('/api/webhook/paystack', async (req, res) => {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Autonomous Outbound Engine running securely on port ${PORT} (Event-Driven Mode Active)`);
+  console.log(`Autonomous Outbound Engine running securely on port ${PORT} (Optimized Event-Driven Mode Active)`);
 });
