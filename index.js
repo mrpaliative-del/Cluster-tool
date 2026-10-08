@@ -1,11 +1,11 @@
 /**
  * ============================================================================
- * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION LOCAL FILE DAEMON
+ * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION LOCAL FILE DAEMON (REDIS-FREE)
  * ============================================================================
  * File: index.js
- * Version: 5.2.9-Production-Zero-Starvation-Paced
- * Architecture: Local JSON File Queue (`tasks.json`) + BullMQ + 
- * Playwright Headless Automation + Paystack Webhook Settlement & KeepAlive.
+ * Version: 5.3.0-Production-Direct-Execution
+ * Architecture: Local JSON File Queue (`tasks.json`) + Playwright Headless 
+ * Automation + Paystack Webhook Settlement & KeepAlive.
  * ============================================================================
  */
 
@@ -15,14 +15,12 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
-const { Queue, Worker } = require('bullmq');
-const IORedis = require('ioredis');
 
 // ==========================================
 // 1. CONFIGURATION & ENVIRONMENT SETUP
 // ==========================================
 const PORT = process.env.PORT || 10000;
-const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 15000; // Paced to 15s default
+const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 15000;
 const AFFILIATE_MARKER = process.env.AFFILIATE_MARKER || 'global_cluster_master_01';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
 const TASKS_FILE = path.join(__dirname, 'tasks.json');
@@ -30,25 +28,6 @@ const TASKS_FILE = path.join(__dirname, 'tasks.json');
 // Telegram Notification Credentials
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '5058299552';
-
-// Redis & BullMQ Setup (Object-based configuration to avoid URL parsing issues)
-const redisHost = 'model-hookworm-205334.upstash.io';
-const redisPort = 6379;
-const redisPassword = 'gQAAAAAAAyIWAAIgcDJjNWViMDhhNzIxN2E0Y2MzYjlkMDEwYzIwOTBiYjQxZQ';
-const redisUsername = 'default';
-
-const redisConnection = new IORedis({
-    host: redisHost,
-    port: redisPort,
-    username: redisUsername,
-    password: redisPassword,
-    tls: {
-        servername: redisHost,
-    },
-    maxRetriesPerRequest: null,
-});
-
-const omniQueue = new Queue('omni-task-queue', { connection: redisConnection });
 
 // Runtime Metrics Tracking for Health Dashboard
 const metrics = {
@@ -99,7 +78,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // B. Resolution & Deep Link Handler (Affiliate / Telegram Click-Through)
+    // B. Resolution & Deep Link Handler
     if (req.method === 'GET' && pathname === '/resolve') {
         const taskId = queryParams.get('task') || 'unknown';
         const marker = queryParams.get('marker') || AFFILIATE_MARKER;
@@ -139,8 +118,8 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
         status: 'online',
-        service: 'Local JSON File Task Execution Engine (Zero-Starvation Autonomous Cluster)',
-        version: '5.2.9-Production-Zero-Starvation-Paced',
+        service: 'Local JSON File Task Execution Engine (Redis-Free Autonomous Cluster)',
+        version: '5.3.0-Production-Direct-Execution',
         marker: AFFILIATE_MARKER,
         metrics: {
             ...metrics,
@@ -154,20 +133,19 @@ server.listen(PORT, async () => {
     console.log(`🌐 [Server] Master HTTP listener bound securely on port ${PORT}`);
     startSelfPingDaemon();
     
-    // Boot-up sound test to ensure Telegram notifications ring properly
-    await dispatchTelegramMessage("🟢 *Cluster Tool Online & Autonomous Scanning Active.*\nYour engine is warm, zero-starvation is engaged, and listening for tasks.", false);
+    await dispatchTelegramMessage("🟢 *Cluster Tool Online & Autonomous Scanning Active (Redis-Free).*\nYour engine is running locally and smoothly listening for tasks.", false);
 });
 
 // ==========================================
-// 3. SELF-PING KEEPALIVE DAEMON (Prevents Cold Starts)
+// 3. SELF-PING KEEPALIVE DAEMON
 // ==========================================
 function startSelfPingDaemon() {
-    const PING_INTERVAL_MS = 10 * 60 * 1000; // Ping every 10 minutes
+    const PING_INTERVAL_MS = 10 * 60 * 1000;
     const targetUrl = `http://localhost:${PORT}/`;
 
     setInterval(() => {
         http.get(targetUrl, (res) => {
-            res.on('data', () => {}); // Consume stream data
+            res.on('data', () => {});
             res.on('end', () => {
                 console.log(`💓 [KeepAlive] Self-ping successful (Status: ${res.statusCode})`);
             });
@@ -180,21 +158,19 @@ function startSelfPingDaemon() {
 }
 
 // ==========================================
-// 4. ADVANCED HIGH-PRIORITY TELEGRAM SYSTEM (WITH RATE-LIMIT COOLDOWN)
+// 4. TELEGRAM NOTIFICATION SYSTEM
 // ==========================================
 let lastTelegramAlertTime = 0;
-const TELEGRAM_COOLDOWN_MS = 12000; // 12-second minimum gap to prevent HTTP 429 Too Many Requests
+const TELEGRAM_COOLDOWN_MS = 12000;
 
 function dispatchTelegramMessage(message, disableNotification = false) {
     return new Promise((resolve) => {
         if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
-            console.warn('⚠️ [Telegram] Skipped: Bot token or chat ID missing.');
             return resolve(false);
         }
 
         const now = Date.now();
         if (!disableNotification && (now - lastTelegramAlertTime < TELEGRAM_COOLDOWN_MS)) {
-            console.log('📱 [Telegram] Alert throttled by cooldown guard to prevent 429 limits.');
             return resolve(false);
         }
         lastTelegramAlertTime = now;
@@ -221,28 +197,10 @@ function dispatchTelegramMessage(message, disableNotification = false) {
         const req = https.request(options, (res) => {
             let responseBody = '';
             res.on('data', chunk => responseBody += chunk);
-            res.on('end', () => {
-                if (res.statusCode === 200) {
-                    console.log('📱 [Telegram] High-priority alert dispatched successfully.');
-                    resolve(true);
-                } else {
-                    console.error(`❌ [Telegram API Error] Status ${res.statusCode}:${responseBody}`);
-                    resolve(false);
-                }
-            });
+            res.on('end', () => resolve(res.statusCode === 200));
         });
 
-        req.on('timeout', () => {
-            console.error('❌ [Telegram Error]: Request timed out.');
-            req.destroy();
-            resolve(false);
-        });
-
-        req.on('error', (err) => {
-            console.error('❌ [Telegram Network Error]:', err.message);
-            resolve(false);
-        });
-
+        req.on('error', () => resolve(false));
         req.write(postData);
         req.end();
     });
@@ -342,48 +300,7 @@ async function executePlaywrightAutomation(task, template) {
 }
 
 // ==========================================
-// 6. BULLMQ WORKER REGISTRATION & LISTENERS
-// ==========================================
-const omniWorker = new Worker(
-    'omni-task-queue',
-    async (job) => {
-        console.log(`📦 [BullMQ Worker] Processing job ID: ${job.id} | Name: ${job.name}`);
-        const { task, template } = job.data;
-        
-        if (!task || !template) {
-            throw new Error('Invalid job payload: missing task or template structure.');
-        }
-
-        return await executePlaywrightAutomation(task, template);
-    },
-    { 
-        connection: redisConnection, 
-        concurrency: 1 
-    }
-);
-
-omniWorker.on('ready', () => {
-    console.log('✅ [BullMQ Worker] Connected to Redis and ready to process jobs.');
-});
-
-omniWorker.on('active', (job) => {
-    console.log(`🏃 [BullMQ Worker] Job ${job.id} picked up and running.`);
-});
-
-omniWorker.on('completed', (job, result) => {
-    console.log(`✨ [BullMQ Worker] Job ${job.id} finished successfully with result:`, result);
-});
-
-omniWorker.on('failed', (job, err) => {
-    console.error(`❌ [BullMQ Worker] Job ${job?.id} failed:`, err.message);
-});
-
-omniWorker.on('error', (err) => {
-    console.error('❌ [BullMQ Worker Redis Error]:', err.message);
-});
-
-// ==========================================
-// 7. DYNAMIC ZERO-STARVATION TASK ROUTER & SCANNER DAEMON
+// 6. DYNAMIC ZERO-STARVATION TASK ROUTER & SCANNER DAEMON
 // ==========================================
 async function fetchAndRouteNextTask() {
     try {
@@ -427,7 +344,7 @@ async function fetchAndRouteNextTask() {
         };
 
         tasks.push(scannedTask);
-        dbData.tasks = tasks.slice(-30); // Keep rolling buffer to prevent file bloat
+        dbData.tasks = tasks.slice(-30);
         fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
 
         const pendingTaskIndex = tasks.findIndex(t => t.status === 'pending');
@@ -442,27 +359,25 @@ async function fetchAndRouteNextTask() {
                                    (taskData.target_asset && taskData.target_asset.toLowerCase().includes(t.keyword_trigger.toLowerCase()));
             const satisfiesPayout = (taskData.estimated_value || 0.40) >= t.minimum_payout;
             return matchesKeyword && satisfiesPayout && t.is_active;
-        }) || templates[0]; // Fallback to first active template to ensure zero starvation
+        }) || templates[0];
 
         if (matchedTemplate) {
             tasks[pendingTaskIndex].status = 'processing';
             tasks[pendingTaskIndex].worker_marker = AFFILIATE_MARKER;
             fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
 
-            console.log(`🎯 [Router Match] Task ID [${taskData.id}] matched template: "${matchedTemplate.template_name}". Enqueuing to BullMQ...`);
+            console.log(`🎯 [Router Match] Task ID [${taskData.id}] matched template: "${matchedTemplate.template_name}". Executing directly...`);
             
-            await omniQueue.add('execute-omni-task', {
-                task: {
-                    id: taskData.id,
-                    sector: taskData.sector,
-                    payload: {
-                        target_asset: taskData.target_asset,
-                        estimated_value: taskData.estimated_value,
-                        url: matchedTemplate.action_schema.target_url
-                    }
-                },
-                template: matchedTemplate
-            });
+            // Directly execute via Playwright without Redis/BullMQ
+            await executePlaywrightAutomation({
+                id: taskData.id,
+                sector: taskData.sector,
+                payload: {
+                    target_asset: taskData.target_asset,
+                    estimated_value: taskData.estimated_value,
+                    url: matchedTemplate.action_schema.target_url
+                }
+            }, matchedTemplate);
 
             tasks[pendingTaskIndex].status = 'completed_automation';
             fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
@@ -477,7 +392,7 @@ async function fetchAndRouteNextTask() {
 }
 
 // ==========================================
-// 8. INDUSTRIAL AUTONOMOUS DAEMON ENGINE LOOP (PACED)
+// 7. INDUSTRIAL AUTONOMOUS DAEMON ENGINE LOOP (PACED)
 // ==========================================
 async function startAutonomousDaemon() {
     console.log(`🚀 [Daemon] Local file zero-starvation task polling loop started (Interval: ${POLL_INTERVAL_MS}ms)`);
@@ -494,7 +409,6 @@ async function startAutonomousDaemon() {
             console.error(`⚠️ [Daemon Loop Exception Warning]:`, daemonErr.message);
         }
 
-        // Always pace the loop with the interval delay to protect system resources and avoid flooding
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
     }
 }
