@@ -15,26 +15,53 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 const AFFILIATE_MARKER = process.env.TRAVELPAYOUTS_MARKER || 'default_marker';
 
 // ==========================================
-// GLOBAL & REGIONAL ROUTE MATRIX
+// MULTI-VERTICAL TRAVEL ASSET MATRIX (Travelpayouts Ecosystem)
 // ==========================================
-const GLOBAL_ROUTE_MATRIX = [
-  { route: 'LOS0112ABV1', value: 85, region: 'Domestic (Lagos - Abuja)' },
-  { route: 'LOS1012ACC1', value: 120, region: 'Regional (Lagos - Accra)' },
-  { route: 'LOS1512JNB1', value: 210, region: 'Continental (Lagos - Johannesburg)' },
-  { route: 'LOS2012LHR1', value: 350, region: 'Intercontinental (Lagos - London)' },
-  { route: 'LOS2212DXB1', value: 320, region: 'Intercontinental (Lagos - Dubai)' },
-  { route: 'ABV2512IST1', value: 290, region: 'Intercontinental (Abuja - Istanbul)' },
-  { route: 'LOS0512JFK1', value: 450, region: 'Intercontinental (Lagos - New York)' }
+const TRAVEL_ASSET_MATRIX = [
+  // Flight Corridors (Aviasales)
+  { vertical: 'flight', path: 'search/LOS0112ABV1', value: 85, region: 'Flight (Lagos - Abuja)' },
+  { vertical: 'flight', path: 'search/LOS1012ACC1', value: 120, region: 'Flight (Lagos - Accra)' },
+  { vertical: 'flight', path: 'search/LOS1512JNB1', value: 210, region: 'Flight (Lagos - Johannesburg)' },
+  { vertical: 'flight', path: 'search/LOS2012LHR1', value: 350, region: 'Flight (Lagos - London)' },
+  { vertical: 'flight', path: 'search/LOS2212DXB1', value: 320, region: 'Flight (Lagos - Dubai)' },
+  { vertical: 'flight', path: 'search/ABV2512IST1', value: 290, region: 'Flight (Abuja - Istanbul)' },
+  { vertical: 'flight', path: 'search/LOS0512JFK1', value: 450, region: 'Flight (Lagos - New York)' },
+
+  // Hotel Corridors (Hotellook / Accommodation)
+  { vertical: 'hotel', path: 'hotels/destination/Lagos_Nigeria', value: 180, region: 'Hotel Stay (Lagos Hub)' },
+  { vertical: 'hotel', path: 'hotels/destination/Abuja_Nigeria', value: 150, region: 'Hotel Stay (Abuja Hub)' },
+  { vertical: 'hotel', path: 'hotels/destination/London_UK', value: 420, region: 'Hotel Stay (London Hub)' },
+  { vertical: 'hotel', path: 'hotels/destination/Dubai_UAE', value: 380, region: 'Hotel Stay (Dubai Hub)' },
+
+  // Car Rental Corridors (Rentalcars / Transport)
+  { vertical: 'car', path: 'rentacar/search/Lagos_Airport', value: 110, region: 'Car Rental (Lagos Hub)' }
 ];
 
 // ==========================================
-// LOCAL PERSISTENCE STORAGE LAYER
+// ROTATING USER-AGENT POOL
+// ==========================================
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0'
+];
+
+// ==========================================
+// LOCAL PERSISTENCE STORAGE LAYER & STATS
 // ==========================================
 const STORAGE_FILE = path.join(__dirname, 'cluster_state.json');
 
 let localData = {
   queue: [],
   state: {}
+};
+
+let dailyStats = {
+  auditsCompleted: 0,
+  valueProtectedUSD: 0,
+  leaksIdentified: 0,
+  startTime: Date.now()
 };
 
 function loadLocalStore() {
@@ -73,7 +100,7 @@ async function storePop() {
   return item; 
 }
 
-// TELEGRAM TELEMETRY ALERT DISPATCHER (Robust & Safe Plain Text)
+// TELEGRAM TELEMETRY ALERT DISPATCHER
 async function sendTelegramAlert(title, task, result) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
     console.warn('⚠️ [Telegram] Skipped alert: Token or Chat ID is missing in environment variables.');
@@ -108,15 +135,44 @@ async function sendTelegramAlert(title, task, result) {
   }
 }
 
+// DAILY REVENUE PROTECTION SUMMARY CRON
+async function sendDailySummaryReport() {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+
+  const uptimeHours = ((Date.now() - dailyStats.startTime) / (1000 * 60 * 60)).toFixed(1);
+  const text = 
+    `📊 *Autonomous Cluster 24-Hour Guardian Report*\n\n` +
+    `• Uptime Window: ${uptimeHours} hours\n` +
+    `• Total Routes Audited: ${dailyStats.auditsCompleted}\n` +
+    `• Total Revenue Protected: $${dailyStats.valueProtectedUSD}\n` +
+    `• Monetary Leaks Caught: ${dailyStats.leaksIdentified}\n` +
+    `• Cluster Status: Operational & Secured`;
+
+  try {
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: text })
+    });
+  } catch (err) {
+    console.error('❌ [Telegram Summary Error]', err.message);
+  }
+
+  setTimeout(sendDailySummaryReport, 24 * 60 * 60 * 1000);
+}
+
+setTimeout(sendDailySummaryReport, 24 * 60 * 60 * 1000);
+
 app.use(express.json());
 
 // HEALTH CHECK ENDPOINT
 app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
-    service: 'Autonomous Headless Arbitrage Cluster',
+    service: 'Autonomous Headless Multi-Vertical Arbitrage Cluster',
     activeMarker: AFFILIATE_MARKER ? 'Configured & Secured' : 'Missing Marker',
     queueLength: localData.queue.length,
+    stats: dailyStats,
     timestamp: new Date().toISOString()
   });
 });
@@ -154,7 +210,7 @@ async function runAutonomousDiscovery() {
           const fullTargetUrl = cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`;
 
           const exists = localData.queue.some(item => item.includes(fullTargetUrl));
-          if (!exists && localData.queue.length < 40 && !fullTargetUrl.includes('duckduckgo') && !fullTargetUrl.includes('aviasales')) {
+          if (!exists && localData.queue.length < 40 && !fullTargetUrl.includes('duckduckgo') && !fullTargetUrl.includes('aviasales') && !fullTargetUrl.includes('hotellook')) {
             const targetUrlWithMarker = `${fullTargetUrl}${fullTargetUrl.includes('?') ? '&' : '?'}marker=${AFFILIATE_MARKER}`;
             const task = {
               batchId: `auto_public_${Date.now()}`,
@@ -172,30 +228,37 @@ async function runAutonomousDiscovery() {
       }
     }
   } catch (err) {
-    console.warn(`⚠️ [Discovery Notice] Public network sweep restricted on cloud IP. Switching to global route matrix.`);
+    console.warn(`⚠️ [Discovery Notice] Public network sweep restricted on cloud IP. Switching to multi-vertical asset matrix.`);
   }
 
-  // Guaranteed resilient fallback: Pulls from expanded global route matrix
+  // Guaranteed resilient fallback: Pulls from multi-vertical Travelpayouts matrix
   if (discoveredCount === 0 && localData.queue.length < 25) {
-    const selectedMatrix = GLOBAL_ROUTE_MATRIX[Math.floor(Math.random() * GLOBAL_ROUTE_MATRIX.length)];
-    const fallbackUrl = `https://www.aviasales.com/search/${selectedMatrix.route}?marker=${AFFILIATE_MARKER}`;
+    const asset = TRAVEL_ASSET_MATRIX[Math.floor(Math.random() * TRAVEL_ASSET_MATRIX.length)];
+    
+    let fallbackUrl = '';
+    if (asset.vertical === 'flight') {
+      fallbackUrl = `https://www.aviasales.com/${asset.path}?marker=${AFFILIATE_MARKER}`;
+    } else if (asset.vertical === 'hotel') {
+      fallbackUrl = `https://www.hotellook.com/${asset.path}?marker=${AFFILIATE_MARKER}`;
+    } else {
+      fallbackUrl = `https://www.rentalcars.com/${asset.path}?marker=${AFFILIATE_MARKER}`;
+    }
 
     const exists = localData.queue.some(item => item.includes(fallbackUrl));
     if (!exists) {
       await storePush(JSON.stringify({
         batchId: `auto_matrix_${Date.now()}`,
         taskId: `arb_${Math.random().toString(36).substring(7)}`,
-        type: 'affiliate_arbitrage_audit',
+        type: `affiliate_${asset.vertical}_audit`,
         targetUrl: fallbackUrl,
         requiredMarker: AFFILIATE_MARKER,
-        estimatedValueUSD: selectedMatrix.value,
+        estimatedValueUSD: asset.value,
         timestamp: Date.now()
       }));
-      console.log(`🚀 [Discovery Engine] Injected [${selectedMatrix.region}] route: ${selectedMatrix.route} ($${selectedMatrix.value})`);
+      console.log(`🚀 [Discovery Engine] Injected [${asset.region}] audit target ($${asset.value})`);
     }
   }
 
-  // Rapid discovery cycle set to every 30 seconds (30000 ms)
   setTimeout(runAutonomousDiscovery, 30 * 1000);
 }
 
@@ -213,6 +276,18 @@ async function getSharedBrowser() {
   return sharedBrowser;
 }
 
+// Precise Parameter-Level Marker Verification
+function verifyAffiliateMarker(finalUrl, requiredMarker) {
+  if (!requiredMarker) return true;
+  try {
+    const parsedFinal = new URL(finalUrl);
+    const markerParam = parsedFinal.searchParams.get('marker');
+    return markerParam === requiredMarker;
+  } catch (err) {
+    return finalUrl.includes(`marker=${requiredMarker}`);
+  }
+}
+
 async function auditArbitrageTarget(task, page) {
   const hopChain = [];
   page.on('response', response => {
@@ -226,11 +301,7 @@ async function auditArbitrageTarget(task, page) {
   const finalUrl = page.url();
   const finalStatus = response ? response.status() : 0;
 
-  let markerSurvived = true;
-  if (task.requiredMarker) {
-    markerSurvived = finalUrl.includes(task.requiredMarker);
-  }
-
+  const markerSurvived = verifyAffiliateMarker(finalUrl, task.requiredMarker);
   const isHealthy = finalStatus < 400 && markerSurvived;
 
   return {
@@ -256,19 +327,22 @@ async function runArbitrageWorker(workerId) {
     console.log(`🔎 [Worker #${workerId}] Headless audit running on: ${task.targetUrl}`);
     
     const browser = await getSharedBrowser();
-    context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-    });
+    const randomUserAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+    
+    context = await browser.newContext({ userAgent: randomUserAgent });
     const page = await context.newPage();
 
     let result = await auditArbitrageTarget(task, page);
     await context.close();
 
-    if (!result.success) {
+    dailyStats.auditsCompleted++;
+    if (result.success) {
+      dailyStats.valueProtectedUSD += task.estimatedValueUSD;
+      console.log(`✅ [Worker #${workerId}] Target Secured. Value protected: $${task.estimatedValueUSD}`);
+    } else {
+      dailyStats.leaksIdentified++;
       console.warn(`💰 [Worker #${workerId}] Monetary Leak Identified on ${task.targetUrl} ($${task.estimatedValueUSD})`);
       await sendTelegramAlert('Monetary Leakage / Arbitrage Alert', task, result);
-    } else {
-      console.log(`✅ [Worker #${workerId}] Route Secured. Value protected: $${task.estimatedValueUSD}`);
     }
 
   } catch (err) {
@@ -286,5 +360,5 @@ setTimeout(() => runArbitrageWorker(2), 7000);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Autonomous Headless Arbitrage Cluster active on port ${PORT}`);
+  console.log(`Autonomous Headless Multi-Vertical Cluster active on port ${PORT}`);
 });
