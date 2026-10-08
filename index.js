@@ -3,7 +3,7 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION CASCADING ECOSYSTEM
  * ============================================================================
  * File: index.js
- * Version: 8.0.0-Production-Compliant-Threshold
+ * Version: 9.0.0-OPay-Production-Ready
  * ============================================================================
  */
 
@@ -21,6 +21,7 @@ const PORT = process.env.PORT || 10000;
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 15000;
 const AFFILIATE_MARKER = process.env.AFFILIATE_MARKER || 'global_cluster_master_01';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
+const OPAY_RECIPIENT_CODE = process.env.OPAY_RECIPIENT_CODE || ''; // Locked-in OPay recipient code (RCP_...)
 const TASKS_FILE = path.join(__dirname, 'tasks.json');
 const WALLET_FILE = path.join(__dirname, 'wallet.json');
 const WITHDRAWAL_THRESHOLD_USD = 5.00;
@@ -127,10 +128,11 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Industrial Cascading Ecosystem Engine',
-        version: '8.0.0-Production-Compliant',
+        version: '9.0.0-OPay-Production-Ready',
         browserReady: metrics.browserReady,
         pendingTasksInQueue: pendingCount,
         walletBalanceUSD: walletData.accumulated_usd,
+        opayRecipientConfigured: Boolean(OPAY_RECIPIENT_CODE),
         marker: AFFILIATE_MARKER,
         metrics: {
             ...metrics,
@@ -145,7 +147,7 @@ server.listen(PORT, async () => {
     console.log(`🌐 [Server] Master HTTP listener bound securely on port ${PORT}`);
     startSelfPingDaemon();
     
-    await dispatchTelegramMessage("🟢 *Industrial Ecosystem Engine Online.*\nCascading Multi-Tier Discovery, Compliance Guardrails & $5.00 Threshold Active.", false);
+    await dispatchTelegramMessage("🟢 *Industrial Ecosystem Engine Online (v9.0.0).* OPay Autonomous Payout Pipeline & $5.00 Threshold Active.", false);
     initializeBackgroundWorker();
 });
 
@@ -226,11 +228,12 @@ function sendTaskAlert(task, payoutAmount, currentBalance) {
     return dispatchTelegramMessage(message, false);
 }
 
-function sendWithdrawalAlert(amountUsd, ngnValue) {
-    const message = `💸 🔊 *PAYSTACK WITHDRAWAL DISPATCHED!*\n\n` +
+function sendWithdrawalAlert(amountUsd, ngnValue, transferReference) {
+    const message = `💸 🔊 *OPAY PAYOUT DISPATCHED VIA PAYSTACK!*\n\n` +
                     `• *Threshold Reached:* \`$${amountUsd.toFixed(2)} USD\`\n` +
-                    `• *Estimated Value:* \`₦${ngnValue.toLocaleString()} NGN\`\n` +
-                    `• *Destination:* \`Paystack Settlement Gateway\`\n` +
+                    `• *Converted Value:* \`₦${ngnValue.toLocaleString()} NGN\`\n` +
+                    `• *Destination:* \`OPay (Metilelu Ayodele Adetayo)\`\n` +
+                    `• *Reference:* \`${transferReference || 'Initiated'}\`\n` +
                     `• *Status:* \`Transfer Request Executed Successfully 🚀\``;
     return dispatchTelegramMessage(message, false);
 }
@@ -245,9 +248,77 @@ function sendWebhookAlert(taskId, amountNGN, reference, sector) {
 }
 
 // ==========================================
-// 5. WALLET & WITHDRAWAL THRESHOLD LOGIC
+// 5. PAYSTACK TRANSFER API (OPAY SETTLEMENT)
 // ==========================================
-function creditWalletAndCheckThreshold(task, earnedAmount) {
+function executeOPayTransfer(amountUsd) {
+    return new Promise((resolve) => {
+        if (!PAYSTACK_SECRET_KEY || !OPAY_RECIPIENT_CODE) {
+            console.error(`❌ [Paystack Transfer Error]: Missing secret key or OPay recipient code.`);
+            dispatchTelegramMessage(`⚠️ *Payout Failed:* Missing Paystack secret key or OPay recipient code configuration.`, true);
+            return resolve(false);
+        }
+
+        // Convert USD to NGN (Approx rate: ~₦1,500/USD, converted to kobo for Paystack)
+        const ngnValue = Math.round(amountUsd * 1500);
+        const amountInKobo = ngnValue * 100;
+        const reference = `opay_auto_${Date.now()}`;
+
+        const postData = JSON.stringify({
+            source: 'balance',
+            amount: amountInKobo,
+            recipient: OPAY_RECIPIENT_CODE,
+            reason: 'Autonomous Task Engine OPay Settlement'
+        });
+
+        const options = {
+            hostname: 'api.paystack.co',
+            port: 443,
+            path: '/transfer',
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${PAYSTACK_SECRET_KEY}`,
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData)
+            }
+        };
+
+        const req = https.request(options, (res) => {
+            let body = '';
+            res.on('data', chunk => body += chunk);
+            res.on('end', async () => {
+                try {
+                    const responseJson = JSON.parse(body);
+                    if (res.statusCode === 200 && responseJson.status) {
+                        console.log(`🚀 [Paystack Transfer Success] Dispatched ₦${ngnValue.toLocaleString()} to OPay. Ref: ${reference}`);
+                        await sendWithdrawalAlert(amountUsd, ngnValue, reference);
+                        resolve(true);
+                    } else {
+                        console.error(`❌ [Paystack Transfer API Error]:`, body);
+                        await dispatchTelegramMessage(`⚠️ *OPay Payout API Error*\n\nResponse: \`${body.slice(0, 100)}\``, true);
+                        resolve(false);
+                    }
+                } catch (err) {
+                    console.error(`❌ [Paystack Transfer Parse Error]:`, err.message);
+                    resolve(false);
+                }
+            });
+        });
+
+        req.on('error', async (err) => {
+            console.error(`❌ [Paystack Network Error]:`, err.message);
+            await dispatchTelegramMessage(`⚠️ *OPay Network Error:* ${err.message}`, true);
+            resolve(false);
+        });
+
+        req.write(postData);
+        req.end();
+    });
+}
+
+// ==========================================
+// 6. WALLET & WITHDRAWAL THRESHOLD LOGIC
+// ==========================================
+async function creditWalletAndCheckThreshold(task, earnedAmount) {
     let wallet = { accumulated_usd: 0.0, total_withdrawn_usd: 0.0, payouts_count: 0 };
     if (fs.existsSync(WALLET_FILE)) {
         wallet = JSON.parse(fs.readFileSync(WALLET_FILE, 'utf8'));
@@ -260,14 +331,20 @@ function creditWalletAndCheckThreshold(task, earnedAmount) {
 
     // Check if threshold ($5.00) is reached
     if (currentBalance >= WITHDRAWAL_THRESHOLD_USD) {
-        console.log(`🚀 [Threshold Reached] Balance ($${currentBalance.toFixed(2)}) meets $5.00 requirement. Triggering Paystack withdrawal...`);
+        console.log(`🚀 [Threshold Reached] Balance ($${currentBalance.toFixed(2)}) meets $5.00 requirement. Executing Paystack OPay transfer...`);
         
-        const approximateNgnValue = Math.round(currentBalance * 1500);
-        sendWithdrawalAlert(currentBalance, approximateNgnValue);
+        const balanceToWithdraw = currentBalance;
+        
+        // Execute real live transfer to OPay
+        const transferSuccess = await executeOPayTransfer(balanceToWithdraw);
 
-        wallet.total_withdrawn_usd += currentBalance;
-        wallet.accumulated_usd = 0.0;
-        wallet.payouts_count += 1;
+        if (transferSuccess) {
+            wallet.total_withdrawn_usd += balanceToWithdraw;
+            wallet.accumulated_usd = 0.0;
+            wallet.payouts_count += 1;
+        } else {
+            console.error(`⚠️ [Payout Deferred] Transfer attempt failed. Retaining balance for next cycle retry.`);
+        }
     }
 
     fs.writeFileSync(WALLET_FILE, JSON.stringify(wallet, null, 2));
@@ -275,7 +352,7 @@ function creditWalletAndCheckThreshold(task, earnedAmount) {
 }
 
 // ==========================================
-// 6. COMPLIANT PLAYWRIGHT AUTOMATION ENGINE CORE
+// 7. COMPLIANT PLAYWRIGHT AUTOMATION ENGINE CORE
 // ==========================================
 async function executePlaywrightAutomation(task) {
     if (!metrics.browserReady) {
@@ -324,7 +401,7 @@ async function executePlaywrightAutomation(task) {
         metrics.tasksProcessedSuccessfully++;
         metrics.lastActiveTimestamp = new Date().toISOString();
 
-        const updatedBalance = creditWalletAndCheckThreshold(task, computedPayout);
+        const updatedBalance = await creditWalletAndCheckThreshold(task, computedPayout);
 
         await sendTaskAlert(task, computedPayout, updatedBalance);
         return { success: true, computedPayout };
@@ -340,7 +417,7 @@ async function executePlaywrightAutomation(task) {
 }
 
 // ==========================================
-// 7. CASCADING MULTI-TIER ECOSYSTEM DISCOVERY
+// 8. CASCADING MULTI-TIER ECOSYSTEM DISCOVERY
 // ==========================================
 async function pollAndDiscoverExternalTasks() {
     try {
@@ -418,7 +495,7 @@ async function pollAndDiscoverExternalTasks() {
 }
 
 // ==========================================
-// 8. INDUSTRIAL DAEMON EXECUTION LOOP
+// 9. INDUSTRIAL DAEMON EXECUTION LOOP
 // ==========================================
 async function startAutonomousDaemon() {
     console.log(`🚀 [Daemon] Zero-starvation compliant ecosystem loop active (Interval: ${POLL_INTERVAL_MS}ms)`);
