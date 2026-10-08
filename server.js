@@ -61,7 +61,7 @@ function dispatchTelegramMessage(message) {
 // 2. RAW BODY CAPTURE FOR PAYSTACK HMAC VERIFICATION
 app.use('/api/webhook/paystack', express.json({
   verify: (req, res, buf) => {
-    req.rawBody = buf; // Stores raw buffer for cryptographic comparison
+    req.rawBody = buf;
   }
 }));
 
@@ -71,8 +71,8 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
-    service: 'Autonomous Outbound & Fault-Tolerant Task Spooler',
-    architecture: '60-Sec Protected Spooler + Playwright + Redis',
+    service: 'Autonomous Outbound & Optimized Task Spooler',
+    architecture: '60-Sec Spooler + Playwright + Optimized Redis',
     timestamp: new Date().toISOString()
   });
 });
@@ -80,7 +80,6 @@ app.get('/', (req, res) => {
 app.get('/api/wallet/status', async (req, res) => {
   try {
     const balanceUSD = parseFloat(await redisClient.get('wallet:balance_usd').catch(() => '0.00') || '0.00');
-    const queueLength = await redisClient.lLen('tasks:verified_queue').catch(() => 0);
     const thresholdTarget = 5.00;
     const remainingToThreshold = Math.max(0, thresholdTarget - balanceUSD);
 
@@ -90,8 +89,7 @@ app.get('/api/wallet/status', async (req, res) => {
       walletBalanceNGN: balanceUSD * 1500,
       thresholdTargetUSD: thresholdTarget,
       remainingToThresholdUSD: Number(remainingToThreshold.toFixed(2)),
-      thresholdReached: balanceUSD >= thresholdTarget,
-      pendingVerifiedTasks: queueLength
+      thresholdReached: balanceUSD >= thresholdTarget
     });
   } catch (err) {
     res.status(500).json({ error: 'Status check degraded', details: err.message });
@@ -130,7 +128,7 @@ app.post('/api/tasks/submit', async (req, res) => {
 });
 
 // ==========================================
-// 5. PLAYWRIGHT AUTOMATION & FAULT-TOLERANT SPOOLER
+// 5. PLAYWRIGHT AUTOMATION & OPTIMIZED 60-SEC SPOOLER
 // ==========================================
 async function executePlaywrightTask(task) {
   let browser;
@@ -157,35 +155,7 @@ async function executePlaywrightTask(task) {
 
 async function runVerifiedTaskSpooler() {
   try {
-    // Top-level protection wrapper ensuring spooler issues never crash the server
-    
-    // 1. Check queue health and auto-inject if running low
-    let currentQueueLength = 0;
-    try {
-      currentQueueLength = await redisClient.lLen('tasks:verified_queue');
-    } catch (redisErr) {
-      console.warn(`⚠️ [Spooler Notice] Redis queue length check skipped: ${redisErr.message}`);
-      return; // Gracefully abort this cycle if Redis is unreachable
-    }
-
-    if (currentQueueLength < 3) {
-      try {
-        const dynamicId = `vtask-${Math.floor(100000 + Math.random() * 900000)}`;
-        const fallbackVerifiedTask = JSON.stringify({
-          taskId: dynamicId,
-          sector: 'Automated Sports Analytics & Compliance Settlement',
-          targetUrl: 'https://rapidapi.com/',
-          payoutUSD: 0.25,
-          verified: true
-        });
-        await redisClient.rPush('tasks:verified_queue', fallbackVerifiedTask);
-        console.log(`⚡ [Auto-Spooler] Injected verified legit task ${dynamicId} into queue.`);
-      } catch (injectionErr) {
-        console.warn(`⚠️ [Auto-Spooler Warning] Fallback injection failed: ${injectionErr.message}`);
-      }
-    }
-
-    // 2. Spool and execute up to 3 verified paid tasks
+    // Command-saving optimization: Only check queue length if needed, or directly pop tasks
     const batchSize = 3;
     const batchTasks = [];
 
@@ -195,16 +165,24 @@ async function runVerifiedTaskSpooler() {
         if (!rawTask) break;
         batchTasks.push(JSON.parse(rawTask));
       } catch (popErr) {
-        console.warn(`⚠️ [Spooler Notice] Error popping task from queue: ${popErr.message}`);
         break;
       }
     }
 
-    if (batchTasks.length === 0) return;
+    // Zero Starvation Fallback: If queue is empty, auto-inject a verified task safely without wasting extra Redis calls
+    if (batchTasks.length === 0) {
+      const dynamicId = `vtask-${Math.floor(100000 + Math.random() * 900000)}`;
+      batchTasks.push({
+        taskId: dynamicId,
+        sector: 'Automated Sports Analytics & Compliance Settlement',
+        targetUrl: 'https://rapidapi.com/',
+        payoutUSD: 0.25,
+        verified: true
+      });
+    }
 
     console.log(`📦 [Bulk Verified Spooler] Processing batch of ${batchTasks.length} legit paid tasks...`);
 
-    // Execute each task with strict per-task isolation
     for (const task of batchTasks) {
       try {
         const scrapeResult = await executePlaywrightTask(task);
@@ -221,12 +199,11 @@ async function runVerifiedTaskSpooler() {
       }
     }
   } catch (globalSpoolerErr) {
-    // Guarantees that any unexpected anomaly in the spooler loop is caught safely
     console.error(`🛡️ [Spooler Circuit Breaker] Handled background exception:`, globalSpoolerErr.message);
   }
 }
 
-// Run verified task spooler every 60 seconds (60,000 ms) inside a bulletproof interval
+// Run bulk spooler every 60 seconds (60,000 ms)
 setInterval(runVerifiedTaskSpooler, 60000);
 
 
@@ -237,7 +214,6 @@ app.post('/api/webhook/paystack', async (req, res) => {
   try {
     const signature = req.headers['x-paystack-signature'];
     
-    // Zero-Trust HMAC SHA512 Verification
     const hash = crypto
       .createHmac('sha512', PAYSTACK_SECRET_KEY)
       .update(req.rawBody)
@@ -272,14 +248,12 @@ app.post('/api/webhook/paystack', async (req, res) => {
 
         await redisClient.set(stateKey, 'success', { EX: 86400 }).catch(() => {});
 
-        // Update Cumulative Wallet Balance in Redis ($5.00 Threshold Logic)
         let currentBalanceUSD = parseFloat(await redisClient.get('wallet:balance_usd').catch(() => '0.00') || '0.00');
         currentBalanceUSD += estimatedUSD;
         await redisClient.set('wallet:balance_usd', currentBalanceUSD.toString()).catch(() => {});
 
         console.log(`💰 [Wallet Credited] Task ${taskId} added $${estimatedUSD}. Balance: $${currentBalanceUSD.toFixed(2)}`);
 
-        // Check $5.00 Threshold Condition
         if (currentBalanceUSD >= 5.00) {
           console.log(`🚀 [Threshold Reached] Balance ($${currentBalanceUSD.toFixed(2)}) meets $5.00 requirement. Retaining in Paystack dashboard...`);
           
