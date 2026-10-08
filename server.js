@@ -193,8 +193,8 @@ async function runVerifiedTaskSpooler() {
       const dynamicId = `vtask-${Math.floor(100000 + Math.random() * 900000)}`;
       batchTasks.push({
         taskId: dynamicId,
-        sector: 'Automated Sports Analytics & Compliance Settlement',
-        targetUrl: 'https://rapidapi.com/',
+        sector: 'Automated Analytics & Compliance Settlement',
+        targetUrl: 'https://example.com',
         payoutUSD: 0.25,
         verified: true
       });
