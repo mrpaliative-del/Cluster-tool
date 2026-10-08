@@ -76,6 +76,28 @@ async function safeRedisPop(queueName) {
 // CONFIG & SECRETS
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
 const CLUSTER_SECRET = process.env.CLUSTER_SECRET || 'your-cluster-hmac-secret';
+const TARGET_SITEMAP_URL = process.env.TARGET_SITEMAP_URL || '';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
+
+// TELEGRAM ALERT HELPER
+async function sendTelegramAlert(text) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+  try {
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        text: text,
+        parse_mode: 'Markdown'
+      })
+    });
+  } catch (err) {
+    console.error('❌ [Telegram Alert Error]', err.message);
+  }
+}
 
 // RAW BODY CAPTURE FOR PAYSTACK HMAC
 app.use('/api/webhook/paystack', express.json({
@@ -88,7 +110,7 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
-    service: '4-Pillar Autonomous Technical Compliance Cluster',
+    service: 'Autonomous High-Velocity 4-Pillar Compliance Cluster with Telegram',
     mode: redisDegraded ? 'In-Memory Fallback Active' : 'Standard Redis Connected',
     timestamp: new Date().toISOString()
   });
@@ -110,15 +132,17 @@ app.post('/api/webhook/paystack', async (req, res) => {
     const amountPaidNGN = data.amount / 100;
     const customerEmail = data.customer.email;
 
-    console.log(`💰 [Escrow Funded] NGN ${amountPaidNGN} received from ${customerEmail}`);
+    console.log(`💰 [Escrow Funded] NGN ${amountPaidNGN} received from${customerEmail}`);
     const currentBalance = parseFloat(await safeRedisGet('wallet:escrow_balance_ngn') || '0.00');
     await safeRedisSet('wallet:escrow_balance_ngn', (currentBalance + amountPaidNGN).toString());
+    
+    await sendTelegramAlert(`💰 *Escrow Funded*\nReceived NGN ${amountPaidNGN} from \`${customerEmail}\``);
   }
 
   res.sendStatus(200);
 });
 
-// MULTI-PILLAR BATCH TASK INGESTION ENDPOINT
+// MANUAL/EXTERNAL BATCH TASK INGESTION ENDPOINT
 app.post('/api/tasks/submit-bundle', async (req, res) => {
   const signature = req.headers['x-escrow-signature'];
   const computedSig = crypto.createHmac('sha256', CLUSTER_SECRET)
@@ -141,7 +165,7 @@ app.post('/api/tasks/submit-bundle', async (req, res) => {
     const payload = JSON.stringify({
       batchId: batchId || 'adhoc_batch',
       taskId: task.taskId,
-      type: task.type, // affiliate_redirect | seo_og_drift | mixed_content | widget_liveness
+      type: task.type,
       targetUrl: task.targetUrl,
       expectedMarker: task.expectedMarker || null,
       selector: task.selector || null,
@@ -190,15 +214,8 @@ async function auditRedirectChain(task, page) {
     markerFound = content.includes(task.expectedMarker);
   }
 
-  return {
-    success: true,
-    type: 'affiliate_redirect',
-    finalUrl,
-    finalStatus,
-    redirectHopCount: redirectChain.length,
-    redirectChain,
-    markerValid: markerFound
-  };
+  const isHealthy = finalStatus < 400 && markerFound;
+  return { success: isHealthy, type: 'affiliate_redirect', finalUrl, finalStatus, redirectHopCount: redirectChain.length, redirectChain, markerValid: markerFound };
 }
 
 // Pillar 2: Programmatic SEO & OpenGraph Tag Drift Verification
@@ -216,15 +233,9 @@ async function auditOpenGraphTags(task, page) {
 
   const hasOgImage = !!metaTags['og:image'];
   const hasTitle = !!metaTags['og:title'] || !!document.title;
+  const isHealthy = hasOgImage && hasTitle;
 
-  return {
-    success: true,
-    type: 'seo_og_drift',
-    status: response ? response.status() : 0,
-    metaTags,
-    hasOgImage,
-    hasTitle
-  };
+  return { success: isHealthy, type: 'seo_og_drift', status: response ? response.status() : 0, metaTags, hasOgImage, hasTitle };
 }
 
 // Pillar 3: Mixed Content & Secure Asset Compliance Scans
@@ -238,13 +249,9 @@ async function auditMixedContent(task, page) {
   });
 
   const response = await page.goto(task.targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-  return {
-    success: true,
-    type: 'mixed_content',
-    status: response ? response.status() : 0,
-    isSecure: insecureRequests.length === 0,
-    insecureRequests
-  };
+  const isSecure = insecureRequests.length === 0;
+
+  return { success: isSecure, type: 'mixed_content', status: response ? response.status() : 0, isSecure, insecureRequests };
 }
 
 // Pillar 4: Third-Party Widget & Payment Gateway DOM Liveness
@@ -252,7 +259,6 @@ async function auditWidgetSelector(task, page) {
   const selector = task.selector || 'iframe';
   let mounted = false;
   let errorMsg = null;
-
   try {
     await page.goto(task.targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForSelector(selector, { timeout: 6000 });
@@ -260,30 +266,61 @@ async function auditWidgetSelector(task, page) {
   } catch (err) {
     errorMsg = err.message;
   }
-
-  return {
-    success: mounted,
-    type: 'widget_liveness',
-    selectorChecked: selector,
-    widgetMounted: mounted,
-    error: errorMsg
-  };
+  return { success: mounted, type: 'widget_liveness', selectorChecked: selector, widgetMounted: mounted, error: errorMsg };
 }
 
-// DYNAMIC TASK ROUTER DISPATCHER
 async function executeTaskRouter(task, page) {
   switch (task.type) {
-    case 'affiliate_redirect':
-      return await auditRedirectChain(task, page);
-    case 'seo_og_drift':
-      return await auditOpenGraphTags(task, page);
-    case 'mixed_content':
-      return await auditMixedContent(task, page);
-    case 'widget_liveness':
-      return await auditWidgetSelector(task, page);
-    default:
-      throw new Error(`Unsupported task type: ${task.type}`);
+    case 'affiliate_redirect': return await auditRedirectChain(task, page);
+    case 'seo_og_drift': return await auditOpenGraphTags(task, page);
+    case 'mixed_content': return await auditMixedContent(task, page);
+    case 'widget_liveness': return await auditWidgetSelector(task, page);
+    default: throw new Error(`Unsupported task type: ${task.type}`);
   }
+}
+
+// ==========================================
+// AUTONOMOUS HIGH-VELOCITY TASK FEEDER
+// ==========================================
+async function runSelfDiscoveryFeeder() {
+  try {
+    let discoveredUrls = [];
+
+    if (TARGET_SITEMAP_URL) {
+      try {
+        const res = await fetch(TARGET_SITEMAP_URL);
+        const xmlText = await res.text();
+        const matches = xmlText.match(/<loc>(.*?)<\/loc>/g);
+        if (matches) {
+          discoveredUrls = matches.map(m => m.replace(/<\/?loc>/g, '')).slice(0, 10);
+        }
+      } catch (e) {}
+    }
+
+    if (discoveredUrls.length === 0) {
+      discoveredUrls = [
+        'https://example.com/travel/flight-deal',
+        'https://example.com/checkout'
+      ];
+    }
+
+    for (const url of discoveredUrls) {
+      const task = {
+        batchId: `auto_high_vel_${Date.now()}`,
+        taskId: `auto_${Math.random().toString(36).substring(7)}`,
+        type: url.includes('checkout') ? 'widget_liveness' : 'seo_og_drift',
+        targetUrl: url,
+        expectedMarker: 'og:image',
+        selector: 'iframe',
+        timestamp: Date.now()
+      };
+      await safeRedisPush('tasks:verified_queue', JSON.stringify(task));
+    }
+  } catch (err) {
+    console.error('❌ [Autonomous Feeder Error]', err.message);
+  }
+
+  setTimeout(runSelfDiscoveryFeeder, 10 * 1000);
 }
 
 // WORKER SPOOLER LOOP
@@ -292,12 +329,12 @@ async function runAuditSpooler() {
   try {
     let rawTask = await safeRedisPop('tasks:verified_queue');
     if (!rawTask) {
-      setTimeout(runAuditSpooler, 4000);
+      setTimeout(runAuditSpooler, 2000);
       return;
     }
 
     const task = JSON.parse(rawTask);
-    console.log(`🔍 [Processing Task] ID: ${task.taskId} | Type: ${task.type} | URL: ${task.targetUrl}`);
+    console.log(`🔍 [Processing Task] ID: ${task.taskId} | Type: ${task.type} \vert{} URL:${task.targetUrl}`);
     
     const browser = await getSharedBrowser();
     context = await browser.newContext({
@@ -308,26 +345,33 @@ async function runAuditSpooler() {
     const auditResult = await executeTaskRouter(task, page);
     await context.close();
 
-    const receipt = {
-      batchId: task.batchId,
-      taskId: task.taskId,
-      ...auditResult,
-      auditTimestamp: new Date().toISOString()
-    };
-
-    console.log(`✅ [Audit Receipt Generated] Task ${receipt.taskId} (${receipt.type}) completed successfully.`);
+    if (!auditResult.success) {
+      console.warn(`⚠️ [Compliance Failure Detected] Task ${task.taskId} (${task.type}) failed verification.`);
+      await sendTelegramAlert(
+        `🚨 *Compliance Failure Detected*\n\n` +
+        `• *Pillar:* \`${task.type}\`\n` +
+        `• *Target:* \`${task.targetUrl}\`\n` +
+        `• *Task ID:* \`${task.taskId}\`\n` +
+        `• *Status:* \`Failed / Non-Compliant\``
+      );
+    } else {
+      console.log(`✅ [Audit Passed] Task ${task.taskId} (${task.type}) verified successfully.`);
+    }
 
   } catch (err) {
     if (context) { try { await context.close(); } catch (e) {} }
     console.error('❌ [Worker Execution Error]', err.message);
+    await sendTelegramAlert(`❌ *Worker Execution Error*\n\`${err.message}\``);
   }
 
-  setTimeout(runAuditSpooler, 1000);
+  setTimeout(runAuditSpooler, 500);
 }
 
-setTimeout(runAuditSpooler, 2000);
+// Kick off autonomous loops on boot
+setTimeout(runSelfDiscoveryFeeder, 3000);
+setTimeout(runAuditSpooler, 1000);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`4-Pillar Compliance Cluster active on port ${PORT}`);
+  console.log(`High-Velocity Autonomous Compliance Cluster with Telegram active on port ${PORT}`);
 });
