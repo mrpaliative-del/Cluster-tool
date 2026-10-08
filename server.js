@@ -134,11 +134,32 @@ async function executePlaywrightTask(task) {
   let browser;
   try {
     console.log(`🤖 [Playwright Worker] Executing verified task: ${task.taskId} [${task.sector}] ->${task.targetUrl}`);
-    browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-    const context = await browser.newContext();
+    
+    // Launch with anti-detection flags
+    browser = await chromium.launch({ 
+      headless: true, 
+      args: [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox',
+        '--disable-blink-features=AutomationControlled'
+      ] 
+    });
+
+    // Create context with real user-agent and human viewport characteristics
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      viewport: { width: 1366, height: 768 },
+      deviceScaleFactor: 1,
+    });
+
+    // Mask the webdriver property to avoid bot detection flags
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    });
+
     const page = await context.newPage();
     
-    await page.goto(task.targetUrl, { timeout: 30000, waitUntil: 'domcontentloaded' });
+    await page.goto(task.targetUrl, { timeout: 35000, waitUntil: 'domcontentloaded' });
     const targetTitle = await page.title();
     console.log(`🔍 [Task Settled] Target Title: "${targetTitle}"`);
     
@@ -155,7 +176,6 @@ async function executePlaywrightTask(task) {
 
 async function runVerifiedTaskSpooler() {
   try {
-    // Command-saving optimization: Only check queue length if needed, or directly pop tasks
     const batchSize = 3;
     const batchTasks = [];
 
@@ -169,7 +189,6 @@ async function runVerifiedTaskSpooler() {
       }
     }
 
-    // Zero Starvation Fallback: If queue is empty, auto-inject a verified task safely without wasting extra Redis calls
     if (batchTasks.length === 0) {
       const dynamicId = `vtask-${Math.floor(100000 + Math.random() * 900000)}`;
       batchTasks.push({
