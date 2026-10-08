@@ -72,7 +72,7 @@ app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
     service: 'Autonomous Outbound & Optimized Task Spooler',
-    architecture: '60-Sec Spooler + Playwright + Optimized Redis',
+    architecture: '5-Min Spooler + Playwright + Optimized Redis',
     timestamp: new Date().toISOString()
   });
 });
@@ -138,7 +138,7 @@ app.post('/api/tasks/submit', async (req, res) => {
 });
 
 // ==========================================
-// 5. PLAYWRIGHT AUTOMATION & OPTIMIZED 60-SEC SPOOLER
+// 5. PLAYWRIGHT AUTOMATION & OPTIMIZED 5-MIN SPOOLER
 // ==========================================
 async function executePlaywrightTask(task) {
   let browser;
@@ -238,8 +238,8 @@ async function runVerifiedTaskSpooler() {
   }
 }
 
-// Run bulk spooler every 60 seconds (60,000 ms)
-setInterval(runVerifiedTaskSpooler, 60000);
+// Run bulk spooler every 5 minutes (300,000 ms) to conserve Redis request limits
+setInterval(runVerifiedTaskSpooler, 300000);
 
 
 // ==========================================
