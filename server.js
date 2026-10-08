@@ -1,6 +1,5 @@
 const express = require('express');
 const crypto = require('crypto');
-const https = require('https');
 const Redis = require('redis');
 const { chromium } = require('playwright');
 
@@ -24,48 +23,29 @@ redisClient.connect().then(() => {
 }).catch(err => console.error('[Redis Connection Warning - Operating in Memory Fallback Mode]', err.message));
 
 // ==========================================
-// RESILIENT IN-MEMORY FALLBACK LAYER (ANTI-RATE-LIMIT)
+// RESILIENT IN-MEMORY FALLBACK LAYER
 // ==========================================
 let redisDegraded = false;
 const memoryQueue = [];
-const localDedupCache = new Map();
 const memoryState = new Map();
-const MAX_LOCAL_CACHE_SIZE = 3000;
-
-function checkAndMarkLocalDedup(hash) {
-  if (localDedupCache.has(hash)) return true;
-  if (localDedupCache.size >= MAX_LOCAL_CACHE_SIZE) {
-    const firstKey = localDedupCache.keys().next().value;
-    localDedupCache.delete(firstKey);
-  }
-  localDedupCache.set(hash, Date.now());
-  return false;
-}
 
 async function safeRedisGet(key) {
   if (redisDegraded) return memoryState.get(key) || null;
   try {
     return await redisClient.get(key);
   } catch (err) {
-    if (err.message && err.message.includes('max requests limit exceeded')) {
-      if (!redisDegraded) {
-        console.warn('⚠️ [Redis Rate Limit Hit] Switching to high-performance in-memory state fallback.');
-        redisDegraded = true;
-      }
-    }
+    if (err.message && err.message.includes('max requests limit exceeded')) redisDegraded = true;
     return memoryState.get(key) || null;
   }
 }
 
-async function safeRedisSet(key, val, options) {
+async function safeRedisSet(key, val) {
   memoryState.set(key, val);
   if (redisDegraded) return;
   try {
-    await redisClient.set(key, val, options);
+    await redisClient.set(key, val);
   } catch (err) {
-    if (err.message && err.message.includes('max requests limit exceeded')) {
-      redisDegraded = true;
-    }
+    if (err.message && err.message.includes('max requests limit exceeded')) redisDegraded = true;
   }
 }
 
@@ -77,137 +57,107 @@ async function safeRedisPush(queueName, payload) {
   try {
     return await redisClient.rPush(queueName, payload);
   } catch (err) {
-    if (err.message && err.message.includes('max requests limit exceeded')) {
-      if (!redisDegraded) {
-        console.warn('⚠️ [Redis Rate Limit Hit] Switching queue to in-memory fallback.');
-        redisDegraded = true;
-      }
-    }
+    if (err.message && err.message.includes('max requests limit exceeded')) redisDegraded = true;
     memoryQueue.push(payload);
     return memoryQueue.length;
   }
 }
 
 async function safeRedisPop(queueName) {
-  if (redisDegraded) {
-    return memoryQueue.shift() || null;
-  }
+  if (redisDegraded) return memoryQueue.shift() || null;
   try {
     return await redisClient.lPop(queueName);
   } catch (err) {
-    if (err.message && err.message.includes('max requests limit exceeded')) {
-      redisDegraded = true;
-    }
+    if (err.message && err.message.includes('max requests limit exceeded')) redisDegraded = true;
     return memoryQueue.shift() || null;
   }
 }
 
-async function safeRedisLen(queueName) {
-  if (redisDegraded) {
-    return memoryQueue.length;
-  }
-  try {
-    return await redisClient.lLen(queueName);
-  } catch (err) {
-    if (err.message && err.message.includes('max requests limit exceeded')) {
-      redisDegraded = true;
-    }
-    return memoryQueue.length;
-  }
-}
-
-// 1. CONFIG & TELEMETRY SETUP
+// CONFIG & SECRETS
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
 const CLUSTER_SECRET = process.env.CLUSTER_SECRET || 'your-cluster-hmac-secret';
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 
-const systemMetrics = {
-  bootTime: new Date().toISOString(),
-  totalTasksProcessed: 0,
-  successfulExecutions: 0,
-  recoveredAnomalies: 0,
-  lastExecutionTimestamp: null
-};
-
-const circuitBreakers = {};
-
-function dispatchTelegramMessage(message) {
-  return new Promise((resolve) => {
-    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return resolve(false);
-
-    const payload = {
-      chat_id: TELEGRAM_CHAT_ID,
-      text: message,
-      parse_mode: 'Markdown'
-    };
-
-    const postData = JSON.stringify(payload);
-
-    const options = {
-      hostname: 'api.telegram.org',
-      port: 443,
-      path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
-      timeout: 10000
-    };
-
-    const req = https.request(options, (res) => {
-      let body = '';
-      res.on('data', chunk => body += chunk);
-      res.on('end', () => resolve(res.statusCode === 200));
-    });
-    req.on('error', () => resolve(false));
-    req.write(postData);
-    req.end();
-  });
-}
-
-// 2. RAW BODY CAPTURE FOR PAYSTACK HMAC
+// RAW BODY CAPTURE FOR PAYSTACK HMAC
 app.use('/api/webhook/paystack', express.json({
-  verify: (req, res, buf) => {
-    req.rawBody = buf;
-  }
+  verify: (req, res, buf) => { req.rawBody = buf; }
 }));
 
 app.use(express.json());
 
-// 3. SYSTEM HEALTH & METRICS
+// HEALTH & METRICS ENDPOINT
 app.get('/', (req, res) => {
-  res.status(200).json({
-    status: 'online',
-    service: 'Fully Autonomous Self-Feeding Outbound Engine',
-    mode: redisDegraded ? 'In-Memory Fallback Active' : 'Standard Redis Connected',
-    timestamp: new Date().toISOString()
-  });
+  status: 'online',
+  service: '4-Pillar Autonomous Technical Compliance Cluster',
+  mode: redisDegraded ? 'In-Memory Fallback Active' : 'Standard Redis Connected',
+  timestamp: new Date().toISOString()
 });
 
-app.get('/api/metrics', async (req, res) => {
-  try {
-    const queueLength = await safeRedisLen('tasks:verified_queue');
-    const balanceUSD = parseFloat(await safeRedisGet('wallet:balance_usd') || '0.00');
+// PAYSTACK ESCROW FUNDING WEBHOOK
+app.post('/api/webhook/paystack', async (req, res) => {
+  const hash = crypto.createHmac('sha512', PAYSTACK_SECRET_KEY)
+    .update(req.rawBody || Buffer.from(''))
+    .digest('hex');
 
-    res.status(200).json({
-      success: true,
-      uptimeSeconds: Math.floor(process.uptime()),
-      bootTime: systemMetrics.bootTime,
-      storageMode: redisDegraded ? 'memory-fallback' : 'redis-active',
-      performance: systemMetrics,
-      activeQueueLength: queueLength,
-      wallet: {
-        balanceUSD: balanceUSD,
-        balanceNGN: balanceUSD * 1500
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: 'Metrics error', details: err.message });
+  if (hash !== req.headers['x-paystack-signature']) {
+    return res.status(401).json({ success: false, error: 'Invalid Paystack Signature' });
   }
+
+  const event = req.body;
+  if (event && event.event === 'charge.success') {
+    const data = event.data;
+    const amountPaidNGN = data.amount / 100;
+    const customerEmail = data.customer.email;
+
+    console.log(`💰 [Escrow Funded] NGN ${amountPaidNGN} received from ${customerEmail}`);
+    const currentBalance = parseFloat(await safeRedisGet('wallet:escrow_balance_ngn') || '0.00');
+    await safeRedisSet('wallet:escrow_balance_ngn', (currentBalance + amountPaidNGN).toString());
+  }
+
+  res.sendStatus(200);
 });
 
-// 4. PLAYWRIGHT AUTOMATION ENGINE
-let sharedBrowser = null;
+// MULTI-PILLAR BATCH TASK INGESTION ENDPOINT
+app.post('/api/tasks/submit-bundle', async (req, res) => {
+  const signature = req.headers['x-escrow-signature'];
+  const computedSig = crypto.createHmac('sha256', CLUSTER_SECRET)
+    .update(JSON.stringify(req.body))
+    .digest('hex');
 
+  if (signature !== computedSig) {
+    return res.status(403).json({ success: false, error: 'Unauthorized: Invalid Escrow Signature' });
+  }
+
+  const { batchId, tasks } = req.body;
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    return res.status(400).json({ success: false, error: 'Invalid or empty task bundle array' });
+  }
+
+  let queuedCount = 0;
+  for (const task of tasks) {
+    if (!task.taskId || !task.type || !task.targetUrl) continue;
+    
+    const payload = JSON.stringify({
+      batchId: batchId || 'adhoc_batch',
+      taskId: task.taskId,
+      type: task.type, // affiliate_redirect | seo_og_drift | mixed_content | widget_liveness
+      targetUrl: task.targetUrl,
+      expectedMarker: task.expectedMarker || null,
+      selector: task.selector || null,
+      timestamp: Date.now()
+    });
+
+    await safeRedisPush('tasks:verified_queue', payload);
+    queuedCount++;
+  }
+
+  res.status(200).json({ success: true, message: `Successfully queued ${queuedCount} tasks from bundle.` });
+});
+
+// ==========================================
+// PLAYWRIGHT 4-PILLAR EXECUTION ROUTINES
+// ==========================================
+
+let sharedBrowser = null;
 async function getSharedBrowser() {
   if (!sharedBrowser || !sharedBrowser.isConnected()) {
     sharedBrowser = await chromium.launch({
@@ -218,177 +168,165 @@ async function getSharedBrowser() {
   return sharedBrowser;
 }
 
-async function executePlaywrightTask(task) {
-  if (circuitBreakers[task.targetUrl] && Date.now() < circuitBreakers[task.targetUrl]) {
-    return { success: true, targetTitle: 'Quarantined Endpoint Bypassed' };
-  }
-
-  let context;
-  try {
-    const browser = await getSharedBrowser();
-    context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    });
-
-    const page = await context.newPage();
-    await page.route('**/*', (route) => {
-      if (['image', 'stylesheet', 'font', 'media'].includes(route.request().resourceType())) {
-        route.abort();
-      } else {
-        route.continue();
-      }
-    });
-
-    const response = await page.goto(task.targetUrl, { waitUntil: 'commit', timeout: 6000 });
-    const statusCode = response ? response.status() : 0;
-    if (statusCode < 200 || statusCode >= 400) throw new Error(`HTTP Status ${statusCode}`);
-
-    const targetTitle = await page.title() || 'Verified Target';
-    await context.close();
-    delete circuitBreakers[task.targetUrl];
-    return { success: true, targetTitle };
-  } catch (error) {
-    if (context) { try { await context.close(); } catch (e) {} }
-    circuitBreakers[task.targetUrl] = Date.now() + (5 * 60 * 1000);
-    throw error;
-  }
-}
-
-async function executeWithRecoveryBridge(task) {
-  try {
-    return await executePlaywrightTask(task);
-  } catch (error) {
-    systemMetrics.recoveredAnomalies++;
-    return { success: true, targetTitle: 'Secure Node (Bridge Recovered)' };
-  }
-}
-
-let adaptiveTimer = null;
-
-async function runVerifiedTaskSpooler() {
-  try {
-    const batchTasks = [];
-    for (let i = 0; i < 2; i++) {
-      let rawTask = await safeRedisPop('tasks:verified_queue');
-      if (!rawTask) break;
-      batchTasks.push(JSON.parse(rawTask));
+// Pillar 1: Affiliate & Deep-Link Redirect Chain Auditing
+async function auditRedirectChain(task, page) {
+  const redirectChain = [];
+  page.on('response', response => {
+    const req = response.request();
+    if (req.isNavigationRequest()) {
+      redirectChain.push({ url: response.url(), status: response.status() });
     }
+  });
 
-    if (batchTasks.length === 0) {
-      clearTimeout(adaptiveTimer);
-      adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 15000);
+  const response = await page.goto(task.targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+  const finalUrl = page.url();
+  const finalStatus = response ? response.status() : 0;
+  
+  let markerFound = true;
+  if (task.expectedMarker) {
+    const content = await page.content();
+    markerFound = content.includes(task.expectedMarker);
+  }
+
+  return {
+    success: true,
+    type: 'affiliate_redirect',
+    finalUrl,
+    finalStatus,
+    redirectHopCount: redirectChain.length,
+    redirectChain,
+    markerValid: markerFound
+  };
+}
+
+// Pillar 2: Programmatic SEO & OpenGraph Tag Drift Verification
+async function auditOpenGraphTags(task, page) {
+  const response = await page.goto(task.targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+  const metaTags = await page.evaluate(() => {
+    const tags = {};
+    document.querySelectorAll('meta').forEach(meta => {
+      const prop = meta.getAttribute('property') || meta.getAttribute('name');
+      const content = meta.getAttribute('content');
+      if (prop) tags[prop] = content;
+    });
+    return tags;
+  });
+
+  const hasOgImage = !!metaTags['og:image'];
+  const hasTitle = !!metaTags['og:title'] || !!document.title;
+
+  return {
+    success: true,
+    type: 'seo_og_drift',
+    status: response ? response.status() : 0,
+    metaTags,
+    hasOgImage,
+    hasTitle
+  };
+}
+
+// Pillar 3: Mixed Content & Secure Asset Compliance Scans
+async function auditMixedContent(task, page) {
+  const insecureRequests = [];
+  page.on('request', request => {
+    const url = request.url();
+    if (task.targetUrl.startsWith('https://') && url.startsWith('http://')) {
+      insecureRequests.push(url);
+    }
+  });
+
+  const response = await page.goto(task.targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+  return {
+    success: true,
+    type: 'mixed_content',
+    status: response ? response.status() : 0,
+    isSecure: insecureRequests.length === 0,
+    insecureRequests
+  };
+}
+
+// Pillar 4: Third-Party Widget & Payment Gateway DOM Liveness
+async function auditWidgetSelector(task, page) {
+  const selector = task.selector || 'iframe';
+  let mounted = false;
+  let errorMsg = null;
+
+  try {
+    await page.goto(task.targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.waitForSelector(selector, { timeout: 6000 });
+    mounted = true;
+  } catch (err) {
+    errorMsg = err.message;
+  }
+
+  return {
+    success: mounted,
+    type: 'widget_liveness',
+    selectorChecked: selector,
+    widgetMounted: mounted,
+    error: errorMsg
+  };
+}
+
+// DYNAMIC TASK ROUTER DISPATCHER
+async function executeTaskRouter(task, page) {
+  switch (task.type) {
+    case 'affiliate_redirect':
+      return await auditRedirectChain(task, page);
+    case 'seo_og_drift':
+      return await auditOpenGraphTags(task, page);
+    case 'mixed_content':
+      return await auditMixedContent(task, page);
+    case 'widget_liveness':
+      return await auditWidgetSelector(task, page);
+    default:
+      throw new Error(`Unsupported task type: ${task.type}`);
+  }
+}
+
+// WORKER SPOOLER LOOP
+async function runAuditSpooler() {
+  let context = null;
+  try {
+    let rawTask = await safeRedisPop('tasks:verified_queue');
+    if (!rawTask) {
+      setTimeout(runAuditSpooler, 4000);
       return;
     }
 
-    for (const task of batchTasks) {
-      try {
-        systemMetrics.totalTasksProcessed++;
-        const scrapeResult = await executeWithRecoveryBridge(task);
-        systemMetrics.successfulExecutions++;
-        systemMetrics.lastExecutionTimestamp = new Date().toISOString();
-      } catch (e) {}
-    }
+    const task = JSON.parse(rawTask);
+    console.log(`🔍 [Processing Task] ID: ${task.taskId} | Type: ${task.type} | URL: ${task.targetUrl}`);
+    
+    const browser = await getSharedBrowser();
+    context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    });
+    const page = await context.newPage();
 
-    const remainingQueue = await safeRedisLen('tasks:verified_queue');
-    clearTimeout(adaptiveTimer);
-    adaptiveTimer = setTimeout(runVerifiedTaskSpooler, remainingQueue > 0 ? 2000 : 15000);
+    const auditResult = await executeTaskRouter(task, page);
+    await context.close();
+
+    const receipt = {
+      batchId: task.batchId,
+      taskId: task.taskId,
+      ...auditResult,
+      auditTimestamp: new Date().toISOString()
+    };
+
+    console.log(`✅ [Audit Receipt Generated] Task ${receipt.taskId} (${receipt.type}) completed successfully.`);
+    // TODO: Forward receipt to downstream database or webhook aggregator
+
   } catch (err) {
-    clearTimeout(adaptiveTimer);
-    adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 15000);
+    if (context) { try { await context.close(); } catch (e) {} }
+    console.error('❌ [Worker Execution Error]', err.message);
   }
+
+  setTimeout(runAuditSpooler, 1000);
 }
 
-setTimeout(runVerifiedTaskSpooler, 3000);
-
-// ==========================================
-// MULTI-SOURCE AUTONOMOUS INGESTION ENGINE
-// ==========================================
-async function ingestDiscoveredTasks(rawTasks, sourceLabel) {
-  try {
-    let addedCount = 0;
-    for (const task of rawTasks) {
-      if (!task.targetUrl || !task.taskId) continue;
-
-      const dedupHash = crypto.createHash('md5').update(task.targetUrl).digest('hex');
-      
-      // Check local in-memory cache first (0 Redis requests)
-      if (checkAndMarkLocalDedup(dedupHash)) continue;
-
-      const payload = JSON.stringify({
-        taskId: task.taskId,
-        sector: sourceLabel,
-        targetUrl: task.targetUrl,
-        payoutUSD: task.payoutUSD || 0.10,
-        verified: true
-      });
-
-      const queueLen = await safeRedisLen('tasks:verified_queue');
-      if (queueLen < 1000) {
-        await safeRedisPush('tasks:verified_queue', payload);
-        addedCount++;
-      }
-    }
-
-    if (addedCount > 0) {
-      console.log(`🌐 [Autonomous Feed] Injected ${addedCount} tasks from: [${sourceLabel}]`);
-      clearTimeout(adaptiveTimer);
-      adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 500);
-    }
-  } catch (err) {
-    console.error(`❌ [Ingestion Error] Source ${sourceLabel}:`, err.message);
-  }
-}
-
-async function fetchHackerNewsTargets() {
-  try {
-    const res = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json');
-    const storyIds = await res.json();
-    const topSlice = storyIds.slice(0, 15);
-    const tasks = [];
-
-    for (const id of topSlice) {
-      try {
-        const itemRes = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`);
-        const item = await itemRes.json();
-        if (item && item.url) {
-          tasks.push({ taskId: `hn-${item.id}`, targetUrl: item.url, payoutUSD: 0.15 });
-        }
-      } catch (e) {}
-    }
-
-    await ingestDiscoveredTasks(tasks, 'Hacker News Live Feed');
-  } catch (err) {}
-
-  setTimeout(fetchHackerNewsTargets, 20 * 60 * 1000);
-}
-
-async function fetchSitemapTargets() {
-  try {
-    const mockFeedUrls = [
-      { id: Date.now() + '-1', url: 'https://httpbin.org/delay/0' },
-      { id: Date.now() + '-2', url: 'https://example.com' },
-      { id: Date.now() + '-3', url: 'https://www.wikipedia.org' }
-    ];
-
-    const tasks = mockFeedUrls.map(item => ({
-      taskId: `feed-${item.id}`,
-      targetUrl: item.url,
-      payoutUSD: 0.10
-    }));
-
-    await ingestDiscoveredTasks(tasks, 'Dynamic Sitemap Spooler');
-  } catch (err) {}
-
-  setTimeout(fetchSitemapTargets, 10 * 60 * 1000);
-}
-
-setTimeout(() => {
-  console.log('🚀 [Autonomous Engine] Self-feeding multi-source harvesting activated.');
-  fetchHackerNewsTargets();
-  fetchSitemapTargets();
-}, 8000);
+setTimeout(runAuditSpooler, 2000);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Autonomous Outbound Engine running securely on port ${PORT} (Anti-Rate-Limit Fallback Active)`);
+  console.log(`4-Pillar Compliance Cluster active on port ${PORT}`);
 });
