@@ -3,7 +3,7 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION CASCADING ECOSYSTEM
  * ============================================================================
  * File: index.js
- * Version: 9.0.0-OPay-Production-Ready
+ * Version: 9.0.2-OPay-Production-Ready
  * ============================================================================
  */
 
@@ -51,7 +51,52 @@ function initializeStorageFiles() {
 initializeStorageFiles();
 
 // ==========================================
-// 2. RENDER HTTP SERVER & HEALTH DASHBOARD
+// 2. PAYSTACK DIRECT API HELPER (NO-UI INITIALIZATION)
+// ==========================================
+function initializePaystackTransactionApi(email, amountInKobo, metadata) {
+    return new Promise((resolve) => {
+        if (!PAYSTACK_SECRET_KEY) return resolve({ status: false, message: 'Missing Secret Key' });
+
+        const postData = JSON.stringify({
+            email: email,
+            amount: amountInKobo,
+            metadata: metadata,
+            callback_url: `https://${process.env.RENDER_EXTERNAL_URL || 'localhost'}/`
+        });
+
+        const options = {
+            hostname: 'api.paystack.co',
+            port: 443,
+            path: '/transaction/initialize',
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${PAYSTACK_SECRET_KEY}`,
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData)
+            }
+        };
+
+        const req = https.request(options, (res) => {
+            let body = '';
+            res.on('data', chunk => body += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(body);
+                    resolve(json);
+                } catch (err) {
+                    resolve({ status: false, message: 'Parse error' });
+                }
+            });
+        });
+
+        req.on('error', () => resolve({ status: false, message: 'Network error' }));
+        req.write(postData);
+        req.end();
+    });
+}
+
+// ==========================================
+// 3. RENDER HTTP SERVER & HEALTH DASHBOARD
 // ==========================================
 const server = http.createServer(async (req, res) => {
     const baseUrl = `http://${req.headers.host || 'localhost'}`;
@@ -93,7 +138,42 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // Paystack Webhook Handler (DelightPay Fulfillment)
+    // Direct Server-to-Server Transaction Initialization Endpoint (Eliminates Abandoned Modal Drops)
+    if (req.method === 'POST' && pathname === '/initialize-transaction') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const payload = JSON.parse(body);
+                const email = payload.email || 'solveease.leads@gmail.com';
+                const amountNGN = parseFloat(payload.amount) || 5000;
+                const amountInKobo = Math.round(amountNGN * 100);
+                
+                const response = await initializePaystackTransactionApi(email, amountInKobo, {
+                    task_id: payload.task_id || `task-${Date.now().toString().slice(-6)}`,
+                    sector: payload.sector || 'DelightPay Direct API Fulfillment'
+                });
+
+                if (response.status) {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify({
+                        status: 'success',
+                        authorization_url: response.data.authorization_url,
+                        reference: response.data.reference
+                    }));
+                } else {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify({ status: 'error', message: response.message }));
+                }
+            } catch (err) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'Invalid payload' }));
+            }
+        });
+        return;
+    }
+
+    // Paystack Webhook Handler (DelightPay Fulfillment & Status Tracking)
     if (req.method === 'POST' && pathname === '/webhook/paystack') {
         let body = '';
         req.on('data', chunk => { body += chunk; });
@@ -104,6 +184,7 @@ const server = http.createServer(async (req, res) => {
                     res.writeHead(401, { 'Content-Type': 'application/json' });
                     return res.end(JSON.stringify({ status: 'error', message: 'Invalid signature' }));
                 }
+                
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ status: 'received' }));
 
@@ -111,7 +192,11 @@ const server = http.createServer(async (req, res) => {
                 if (event.event === 'charge.success') {
                     const data = event.data;
                     const metadata = data.metadata || {};
+                    console.log(`✅ [Webhook Success] Charge verified! Ref: ${data.reference}, Amount: ₦${data.amount / 100}`);
                     await sendWebhookAlert(metadata.task_id || 'unknown', data.amount / 100, data.reference, metadata.sector || 'DelightPay Fulfillment');
+                } else if (event.event === 'charge.abandoned') {
+                    const data = event.data;
+                    console.log(`⚠️ [Webhook Notice] Transaction abandoned: ${data.reference}`);
                 }
             } catch (err) {
                 console.error('⚠️ [Webhook Error]:', err.message);
@@ -128,7 +213,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Industrial Cascading Ecosystem Engine',
-        version: '9.0.0-OPay-Production-Ready',
+        version: '9.0.2-OPay-Production-Ready',
         browserReady: metrics.browserReady,
         pendingTasksInQueue: pendingCount,
         walletBalanceUSD: walletData.accumulated_usd,
@@ -147,12 +232,12 @@ server.listen(PORT, async () => {
     console.log(`🌐 [Server] Master HTTP listener bound securely on port ${PORT}`);
     startSelfPingDaemon();
     
-    await dispatchTelegramMessage("🟢 *Industrial Ecosystem Engine Online (v9.0.0).* OPay Autonomous Payout Pipeline & $5.00 Threshold Active.", false);
+    await dispatchTelegramMessage("🟢 *Industrial Ecosystem Engine Online (v9.0.2).* Direct API Initialization & Autonomous Payout Pipeline Active.", false);
     initializeBackgroundWorker();
 });
 
 // ==========================================
-// 3. BACKGROUND BROWSER SETUP & DAEMON INIT
+// 4. BACKGROUND BROWSER SETUP & DAEMON INIT
 // ==========================================
 async function initializeBackgroundWorker() {
     try {
@@ -178,7 +263,7 @@ function startSelfPingDaemon() {
 }
 
 // ==========================================
-// 4. TELEGRAM NOTIFICATION SYSTEM
+// 5. TELEGRAM NOTIFICATION SYSTEM
 // ==========================================
 let lastTelegramAlertTime = 0;
 const TELEGRAM_COOLDOWN_MS = 5000;
@@ -248,7 +333,7 @@ function sendWebhookAlert(taskId, amountNGN, reference, sector) {
 }
 
 // ==========================================
-// 5. PAYSTACK TRANSFER API (OPAY SETTLEMENT)
+// 6. PAYSTACK TRANSFER API (OPAY SETTLEMENT)
 // ==========================================
 function executeOPayTransfer(amountUsd) {
     return new Promise((resolve) => {
@@ -258,7 +343,6 @@ function executeOPayTransfer(amountUsd) {
             return resolve(false);
         }
 
-        // Convert USD to NGN (Approx rate: ~₦1,500/USD, converted to kobo for Paystack)
         const ngnValue = Math.round(amountUsd * 1500);
         const amountInKobo = ngnValue * 100;
         const reference = `opay_auto_${Date.now()}`;
@@ -316,7 +400,7 @@ function executeOPayTransfer(amountUsd) {
 }
 
 // ==========================================
-// 6. WALLET & WITHDRAWAL THRESHOLD LOGIC
+// 7. WALLET & WITHDRAWAL THRESHOLD LOGIC
 // ==========================================
 async function creditWalletAndCheckThreshold(task, earnedAmount) {
     let wallet = { accumulated_usd: 0.0, total_withdrawn_usd: 0.0, payouts_count: 0 };
@@ -329,13 +413,10 @@ async function creditWalletAndCheckThreshold(task, earnedAmount) {
 
     console.log(`💰 [Wallet Credited] Task ${task.id} added $${earnedAmount.toFixed(2)}. Balance: $${currentBalance.toFixed(2)}`);
 
-    // Check if threshold ($5.00) is reached
     if (currentBalance >= WITHDRAWAL_THRESHOLD_USD) {
         console.log(`🚀 [Threshold Reached] Balance ($${currentBalance.toFixed(2)}) meets $5.00 requirement. Executing Paystack OPay transfer...`);
         
         const balanceToWithdraw = currentBalance;
-        
-        // Execute real live transfer to OPay
         const transferSuccess = await executeOPayTransfer(balanceToWithdraw);
 
         if (transferSuccess) {
@@ -352,7 +433,7 @@ async function creditWalletAndCheckThreshold(task, earnedAmount) {
 }
 
 // ==========================================
-// 7. COMPLIANT PLAYWRIGHT AUTOMATION ENGINE CORE
+// 8. COMPLIANT PLAYWRIGHT AUTOMATION ENGINE CORE
 // ==========================================
 async function executePlaywrightAutomation(task) {
     if (!metrics.browserReady) {
@@ -385,7 +466,6 @@ async function executePlaywrightAutomation(task) {
         
         const page = await context.newPage();
 
-        // Compliance Guard: Natural human jitter delay (1 to 3 seconds)
         const politeJitterMs = Math.floor(Math.random() * 2000) + 1000;
         await new Promise(resolve => setTimeout(resolve, politeJitterMs));
 
@@ -394,7 +474,6 @@ async function executePlaywrightAutomation(task) {
         const pageTitle = await page.title();
         console.log(`🔍 [Compliance & Scrape Success] Target Title: "${pageTitle}"`);
 
-        // Compliance Guard: Gentle dwell pause before finishing
         await new Promise(resolve => setTimeout(resolve, 1500));
 
         const computedPayout = Math.max(task.estimated_value || 1.25, 0.50);
@@ -417,7 +496,7 @@ async function executePlaywrightAutomation(task) {
 }
 
 // ==========================================
-// 8. CASCADING MULTI-TIER ECOSYSTEM DISCOVERY
+// 9. CASCADING MULTI-TIER ECOSYSTEM DISCOVERY
 // ==========================================
 async function pollAndDiscoverExternalTasks() {
     try {
@@ -427,14 +506,12 @@ async function pollAndDiscoverExternalTasks() {
         const dbData = JSON.parse(rawData);
         let tasks = dbData.tasks || [];
 
-        // Check if queue is starving (0 pending tasks)
         const pendingTasks = tasks.filter(t => t.status === 'pending');
         if (pendingTasks.length === 0) {
             console.log(`⚠️ [Starvation Prevention] Queue empty. Initiating Cascading Multi-Tier Discovery...`);
             
             let selectedTarget = null;
 
-            // --- TIER 1: HIGH-VALUE LOCKED-IN SERVICE GAP NICHES ---
             const tier1NichePool = [
                 { sector: 'Payment Processing & Asset Fulfillment (DelightPay)', url: 'https://paystack.com/', value: 1.50 },
                 { sector: 'Gateway Synchronization & Webhook Verification', url: 'https://dashboard.paystack.com/', value: 1.25 },
@@ -443,12 +520,11 @@ async function pollAndDiscoverExternalTasks() {
                 { sector: 'Automated Sports Analytics & Webhook Dispatch', url: 'https://rapidapi.com/', value: 1.00 }
             ];
 
-            const fetchTier1Success = Math.random() > 0.15; // 85% preference for custom niches
+            const fetchTier1Success = Math.random() > 0.15;
             if (fetchTier1Success) {
                 selectedTarget = tier1NichePool[Math.floor(Math.random() * tier1NichePool.length)];
                 console.log(`🎯 [Tier 1 Hit] Acquired task from your locked-in service gap niches.`);
             } else {
-                // --- TIER 2: GLOBAL ECOSYSTEM CASCADING FALLBACK (NON-STARVATION GUARANTEE) ---
                 console.log(`🔄 [Tier 1 Dry] Cascading to Tier 2 (Global Infrastructure Pools)...`);
                 const tier2GlobalPool = [
                     { sector: 'Global Sector - Web Content Indexing', url: 'https://www.google.com/', value: 1.00 },
@@ -470,10 +546,9 @@ async function pollAndDiscoverExternalTasks() {
             tasks.push(newDiscoveredTask);
             dbData.tasks = tasks;
             fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
-            console.log(`✨ [Discovered & Ingested] ID: ${newDiscoveredTask.id} | Sector: ${newDiscoveredTask.sector}`);
+            console.log(`✨ [Discovered & Ingested] ID: ${newDiscoveredTask.id} | Sector: ${newDisworkingTask.sector}`);
         }
 
-        // Process the next pending task in queue
         const pendingIndex = tasks.findIndex(t => t.status === 'pending');
         if (pendingIndex === -1) return;
 
@@ -481,10 +556,8 @@ async function pollAndDiscoverExternalTasks() {
         tasks[pendingIndex].status = 'processing';
         fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
 
-        // Execute via Playwright against the target with compliance guardrails
         await executePlaywrightAutomation(taskData);
 
-        // Mark completed and clean history
         tasks[pendingIndex].status = 'completed';
         dbData.tasks = tasks.slice(-50);
         fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
@@ -495,7 +568,7 @@ async function pollAndDiscoverExternalTasks() {
 }
 
 // ==========================================
-// 9. INDUSTRIAL DAEMON EXECUTION LOOP
+// 10. INDUSTRIAL DAEMON EXECUTION LOOP
 // ==========================================
 async function startAutonomousDaemon() {
     console.log(`🚀 [Daemon] Zero-starvation compliant ecosystem loop active (Interval: ${POLL_INTERVAL_MS}ms)`);
