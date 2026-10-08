@@ -3,7 +3,7 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION LOCAL FILE DAEMON
  * ============================================================================
  * File: index.js
- * Version: 5.2.2-Production-Unified-Local
+ * Version: 5.2.3-Production-Unified-Local
  * Architecture: Local JSON File Queue (`tasks.json`) + BullMQ + 
  * Playwright Headless Automation + Paystack Webhook Settlement & Telegram Alerts.
  * ============================================================================
@@ -31,9 +31,17 @@ const TASKS_FILE = path.join(__dirname, 'tasks.json');
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '5058299552';
 
-// Redis & BullMQ Setup (Connected via Render's REDIS_URL)
-const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
+// Redis & BullMQ Setup (Robust URI sanitizer for Upstash / Render)
+let rawRedisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+if (rawRedisUrl.startsWith('//')) {
+    rawRedisUrl = 'rediss:' + rawRedisUrl;
+} else if (!rawRedisUrl.includes('://')) {
+    rawRedisUrl = `rediss://${rawRedisUrl}`;
+}
+
+const redisConnection = new IORedis(rawRedisUrl, {
     maxRetriesPerRequest: null,
+    tls: rawRedisUrl.startsWith('rediss://') ? {} : undefined,
 });
 
 const omniQueue = new Queue('omni-task-queue', { connection: redisConnection });
@@ -128,7 +136,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Local JSON File Task Execution Engine (BullMQ Integrated)',
-        version: '5.2.2-Production-Unified-Local',
+        version: '5.2.3-Production-Unified-Local',
         marker: AFFILIATE_MARKER,
         metrics: {
             ...metrics,
