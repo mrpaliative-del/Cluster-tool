@@ -22,13 +22,10 @@ const AFFILIATE_ASSET_MATRIX = [
   { vertical: 'flight', domain: 'https://www.aviasales.com/', path: 'search/LOS0112ABV1', value: 85, region: 'Flight (Lagos - Abuja)' },
   { vertical: 'flight', domain: 'https://www.aviasales.com/', path: 'search/LOS2012LHR1', value: 350, region: 'Flight (Lagos - London)' },
   { vertical: 'flight', domain: 'https://www.aviasales.com/', path: 'search/LOS2212DXB1', value: 320, region: 'Flight (Lagos - Dubai)' },
-  { vertical: 'hotel', domain: 'https://www.aviasales.com/', path: 'search/LOS0112ABV1', value: 180, region: 'Hotel Corridor (Lagos Hub)' },
-
-  // --- E-Commerce & Tech Hardware (Amazon) ---
-  { vertical: 'retail', domain: 'https://www.amazon.com/', path: 's?k=developer+laptop+stand', value: 45, region: 'Tech Hardware (Amazon Hub)' },
-  { vertical: 'retail', domain: 'https://www.amazon.com/', path: 's?k=portable+monitor+usb+c', value: 95, region: 'Tech Gear (Retail Hub)' },
+  { vertical: 'flight', domain: 'https://www.aviasales.com/', path: 'search/LOS1512JNB1', value: 210, region: 'Flight (Lagos - Johannesburg)' },
 
   // --- Cloud Hosting & Developer Tools (SaaS) ---
+  { vertical: 'saas', domain: 'https://www.siteground.com/gohome?a_id=', path: AFFILIATE_MARKER, value: 100, region: 'Managed Cloud Hosting (SiteGround)' },
   { vertical: 'saas', domain: 'https://www.digitalocean.com/?ref=', path: AFFILIATE_MARKER, value: 50, region: 'Cloud Infrastructure (DigitalOcean)' }
 ];
 
@@ -182,10 +179,8 @@ async function runAutonomousDiscovery() {
     const asset = AFFILIATE_ASSET_MATRIX[Math.floor(Math.random() * AFFILIATE_ASSET_MATRIX.length)];
     
     let fallbackUrl = '';
-    if (asset.vertical === 'flight' || asset.vertical === 'hotel') {
+    if (asset.vertical === 'flight') {
       fallbackUrl = `${asset.domain}${asset.path}?marker=${AFFILIATE_MARKER}`;
-    } else if (asset.vertical === 'retail') {
-      fallbackUrl = `${asset.domain}${asset.path}&tag=${AFFILIATE_MARKER}`;
     } else if (asset.vertical === 'saas') {
       fallbackUrl = `${asset.domain}${asset.path}`;
     }
@@ -223,16 +218,15 @@ async function getSharedBrowser() {
   return sharedBrowser;
 }
 
-// Precise Parameter-Level Attribution Verification (Supports marker, tag, and ref)
+// Precise Parameter-Level Attribution Verification
 function verifyAttributionMarker(finalUrl, requiredMarker) {
   if (!requiredMarker) return true;
   try {
     const parsedFinal = new URL(finalUrl);
     const markerParam = parsedFinal.searchParams.get('marker');
-    const tagParam = parsedFinal.searchParams.get('tag');
     const refParam = parsedFinal.searchParams.get('ref');
     const aidParam = parsedFinal.searchParams.get('a_id');
-    return markerParam === requiredMarker || tagParam === requiredMarker || refParam === requiredMarker || aidParam === requiredMarker;
+    return markerParam === requiredMarker || refParam === requiredMarker || aidParam === requiredMarker;
   } catch (err) {
     return finalUrl.includes(requiredMarker);
   }
