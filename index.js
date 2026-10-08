@@ -3,7 +3,7 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION LOCAL FILE DAEMON
  * ============================================================================
  * File: index.js
- * Version: 5.2.1-Production-Unified-Local
+ * Version: 5.2.2-Production-Unified-Local
  * Architecture: Local JSON File Queue (`tasks.json`) + BullMQ + 
  * Playwright Headless Automation + Paystack Webhook Settlement & Telegram Alerts.
  * ============================================================================
@@ -31,7 +31,7 @@ const TASKS_FILE = path.join(__dirname, 'tasks.json');
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '5058299552';
 
-// Redis & BullMQ Setup (Updated to use REDIS_URL from Render environment)
+// Redis & BullMQ Setup (Connected via Render's REDIS_URL)
 const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
     maxRetriesPerRequest: null,
 });
@@ -128,7 +128,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Local JSON File Task Execution Engine (BullMQ Integrated)',
-        version: '5.2.1-Production-Unified-Local',
+        version: '5.2.2-Production-Unified-Local',
         marker: AFFILIATE_MARKER,
         metrics: {
             ...metrics,
@@ -294,7 +294,7 @@ async function executePlaywrightAutomation(task, template) {
 }
 
 // ==========================================
-// 5. BULLMQ WORKER REGISTRATION
+// 5. BULLMQ WORKER REGISTRATION & LISTENERS
 // ==========================================
 const omniWorker = new Worker(
     'omni-task-queue',
@@ -310,16 +310,28 @@ const omniWorker = new Worker(
     },
     { 
         connection: redisConnection, 
-        concurrency: 2 
+        concurrency: 1 
     }
 );
 
-omniWorker.on('failed', (job, err) => {
-    console.error(`❌ [BullMQ Worker] Job ${job?.id} permanently failed:`, err.message);
+omniWorker.on('ready', () => {
+    console.log('✅ [BullMQ Worker] Connected to Redis and ready to process jobs.');
 });
 
-omniWorker.on('completed', (job) => {
-    console.log(`✨ [BullMQ Worker] Job ${job.id} successfully finished.`);
+omniWorker.on('active', (job) => {
+    console.log(`🏃 [BullMQ Worker] Job ${job.id} picked up and running.`);
+});
+
+omniWorker.on('completed', (job, result) => {
+    console.log(`✨ [BullMQ Worker] Job ${job.id} finished successfully with result:`, result);
+});
+
+omniWorker.on('failed', (job, err) => {
+    console.error(`❌ [BullMQ Worker] Job ${job?.id} failed:`, err.message);
+});
+
+omniWorker.on('error', (err) => {
+    console.error('❌ [BullMQ Worker Redis Error]:', err.message);
 });
 
 // ==========================================
@@ -328,7 +340,6 @@ omniWorker.on('completed', (job) => {
 async function fetchAndRouteNextTask() {
     try {
         if (!fs.existsSync(TASKS_FILE)) {
-            // Initialize default local file structure if missing
             const initialData = {
                 templates: [
                     {
@@ -377,7 +388,6 @@ async function fetchAndRouteNextTask() {
         });
 
         if (matchedTemplate) {
-            // Mark task as processing locally
             tasks[pendingTaskIndex].status = 'processing';
             tasks[pendingTaskIndex].worker_marker = AFFILIATE_MARKER;
             fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
@@ -397,7 +407,6 @@ async function fetchAndRouteNextTask() {
                 template: matchedTemplate
             });
 
-            // Update status to completed after queue dispatch
             tasks[pendingTaskIndex].status = 'completed_automation';
             fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
 
@@ -434,5 +443,4 @@ async function startAutonomousDaemon() {
     }
 }
 
-// Start the master background execution daemon loop
 startAutonomousDaemon();
