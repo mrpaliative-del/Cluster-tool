@@ -3,7 +3,7 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION CASCADING ECOSYSTEM
  * ============================================================================
  * File: index.js
- * Version: 9.0.4-Url-Safety-Patch
+ * Version: 9.1.0-Outbound-Secure-Patch
  * ============================================================================
  */
 
@@ -21,7 +21,7 @@ const PORT = process.env.PORT || 10000;
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 15000;
 const AFFILIATE_MARKER = process.env.AFFILIATE_MARKER || 'global_cluster_master_01';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
-const OPAY_RECIPIENT_CODE = process.env.OPAY_RECIPIENT_CODE || ''; // Reserved for post-CAC upgrade
+const OPAY_RECIPIENT_CODE = process.env.OPAY_RECIPIENT_CODE || ''; 
 const TASKS_FILE = path.join(__dirname, 'tasks.json');
 const WALLET_FILE = path.join(__dirname, 'wallet.json');
 const WITHDRAWAL_THRESHOLD_USD = 5.00;
@@ -51,7 +51,7 @@ function initializeStorageFiles() {
 initializeStorageFiles();
 
 // ==========================================
-// 2. PAYSTACK DIRECT API HELPER (NO-UI INITIALIZATION)
+// 2. PAYSTACK DIRECT API HELPER
 // ==========================================
 function initializePaystackTransactionApi(email, amountInKobo, metadata) {
     return new Promise((resolve) => {
@@ -96,7 +96,7 @@ function initializePaystackTransactionApi(email, amountInKobo, metadata) {
 }
 
 // ==========================================
-// 3. RENDER HTTP SERVER & HEALTH DASHBOARD
+// 3. RENDER HTTP SERVER & WEBHOOK INGESTION
 // ==========================================
 const server = http.createServer(async (req, res) => {
     const baseUrl = `http://${req.headers.host || 'localhost'}`;
@@ -173,38 +173,34 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // Paystack Webhook Handler (Strict Success Filtering - Ignores Abandoned Transactions)
+    // Secure Paystack Webhook Handler with Strict HMAC SHA512 Verification
     if (req.method === 'POST' && pathname === '/webhook/paystack') {
         let body = '';
         req.on('data', chunk => { body += chunk; });
         req.on('end', async () => {
             try {
+                const signature = req.headers['x-paystack-signature'];
                 const hash = crypto.createHmac('sha512', PAYSTACK_SECRET_KEY).update(body).digest('hex');
-                if (hash !== req.headers['x-paystack-signature']) {
+                
+                if (hash !== signature) {
+                    console.warn('[Security] Unauthorized webhook signature dropped.');
                     res.writeHead(401, { 'Content-Type': 'application/json' });
                     return res.end(JSON.stringify({ status: 'error', message: 'Invalid signature' }));
                 }
                 
+                // Acknowledge receipt immediately to comply with gateway timeout rules
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ status: 'received' }));
 
                 const event = JSON.parse(body);
                 
-                // STRICT CHECK: Only process verified successful charges
                 if (event.event === 'charge.success') {
                     const data = event.data;
-                    
-                    if (data.status !== 'success') {
-                        console.log(`⚠️ [Webhook Ignored] Transaction status is '${data.status}', not strictly success.`);
-                        return;
-                    }
+                    if (data.status !== 'success') return;
 
                     const metadata = data.metadata || {};
                     console.log(`✅ [Webhook Success] Verified successful charge! Ref: ${data.reference}, Amount: ₦${data.amount / 100}`);
                     await sendWebhookAlert(metadata.task_id || 'unknown', data.amount / 100, data.reference, metadata.sector || 'DelightPay Fulfillment');
-                } else {
-                    // Log and completely skip abandoned, failed, or pending events
-                    console.log(`ℹ️ [Webhook Notice] Event '${event.event}' received and bypassed (No wallet credit).`);
                 }
             } catch (err) {
                 console.error('⚠️ [Webhook Error]:', err.message);
@@ -221,7 +217,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Industrial Cascading Ecosystem Engine',
-        version: '9.0.4-Url-Safety-Patch',
+        version: '9.1.0-Outbound-Secure-Patch',
         browserReady: metrics.browserReady,
         pendingTasksInQueue: pendingCount,
         walletBalanceUSD: walletData.accumulated_usd,
@@ -240,7 +236,7 @@ server.listen(PORT, async () => {
     console.log(`🌐 [Server] Master HTTP listener bound securely on port ${PORT}`);
     startSelfPingDaemon();
     
-    await dispatchTelegramMessage("🟢 *Industrial Ecosystem Engine Online (v9.0.4).* URL Safety Patch & Dashboard Balance Retention Active.", false);
+    await dispatchTelegramMessage("🟢 *Industrial Ecosystem Engine Online (v9.1.0).* Outbound Polling & Security Patch Active.", false);
     initializeBackgroundWorker();
 });
 
@@ -339,7 +335,7 @@ function sendWebhookAlert(taskId, amountNGN, reference, sector) {
 }
 
 // ==========================================
-// 6. PAYSTACK DASHBOARD BALANCE ACCUMULATION
+// 6. DASHBOARD BALANCE ACCUMULATION
 // ==========================================
 function handleDashboardBalanceAccumulation(amountUsd) {
     return new Promise(async (resolve) => {
@@ -365,8 +361,6 @@ async function creditWalletAndCheckThreshold(task, earnedAmount) {
     console.log(`💰 [Wallet Credited] Task ${task.id} added $${earnedAmount.toFixed(2)}. Balance: $${currentBalance.toFixed(2)}`);
 
     if (currentBalance >= WITHDRAWAL_THRESHOLD_USD) {
-        console.log(`🚀 [Threshold Reached] Balance ($${currentBalance.toFixed(2)}) meets $5.00 requirement. Retaining in Paystack dashboard...`);
-        
         const balanceToWithdraw = currentBalance;
         const retentionSuccess = await handleDashboardBalanceAccumulation(balanceToWithdraw);
 
@@ -382,34 +376,23 @@ async function creditWalletAndCheckThreshold(task, earnedAmount) {
 }
 
 // ==========================================
-// 8. COMPLIANT PLAYWRIGHT AUTOMATION ENGINE CORE
+// 8. PLAYWRIGHT AUTOMATION ENGINE CORE
 // ==========================================
 async function executePlaywrightAutomation(task) {
-    // Robust validation safeguard against malformed tasks with missing or undefined URLs
     if (!task || !task.target_url || typeof task.target_url !== 'string') {
-        console.log(`⚠️ [Skipped] Task ID: ${task?.id || 'unknown'} has an invalid or missing target_url.`);
         return { success: false };
     }
 
     if (!metrics.browserReady) {
-        console.log(`⏳ [Worker] Browser still initializing. Retrying next cycle...`);
         return { success: false };
     }
 
     const { chromium } = require('playwright');
-    console.log(`🤖 [Playwright Worker] Processing task ID: ${task.id} [${task.sector}] -> ${task.target_url}`);
-    
     let browser = null;
     try {
         browser = await chromium.launch({
             headless: true,
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                '--disable-dev-shm-usage', 
-                '--disable-gpu',
-                '--disable-blink-features=AutomationControlled'
-            ]
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         });
 
         const context = await browser.newContext({
@@ -420,30 +403,20 @@ async function executePlaywrightAutomation(task) {
         });
         
         const page = await context.newPage();
-
-        const politeJitterMs = Math.floor(Math.random() * 2000) + 1000;
-        await new Promise(resolve => setTimeout(resolve, politeJitterMs));
-
+        await new Promise(resolve => setTimeout(resolve, 1000));
         await page.goto(task.target_url, { waitUntil: 'domcontentloaded', timeout: 35000 });
         
-        const pageTitle = await page.title();
-        console.log(`🔍 [Compliance & Scrape Success] Target Title: "${pageTitle}"`);
-
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-        const computedPayout = Math.max(task.estimated_value || 1.25, 0.50);
         metrics.tasksProcessedSuccessfully++;
         metrics.lastActiveTimestamp = new Date().toISOString();
 
+        const computedPayout = Math.max(task.estimated_value || 1.25, 0.50);
         const updatedBalance = await creditWalletAndCheckThreshold(task, computedPayout);
 
         await sendTaskAlert(task, computedPayout, updatedBalance);
         return { success: true, computedPayout };
 
     } catch (err) {
-        console.error(`❌ [Playwright Compliance/Execution Error]:`, err.message);
         metrics.tasksFailed++;
-        await dispatchTelegramMessage(`⚠️ *Compliance / Execution Notice*\n\n*Task ID:* ${task.id}\n*Sector:* ${task.sector}\n*Status:* Handled gracefully (${err.message.slice(0, 60)})`, true);
         throw err;
     } finally {
         if (browser) await browser.close();
@@ -463,8 +436,6 @@ async function pollAndDiscoverExternalTasks() {
 
         const pendingTasks = tasks.filter(t => t.status === 'pending');
         if (pendingTasks.length === 0) {
-            console.log(`⚠️ [Starvation Prevention] Queue empty. Initiating Cascading Multi-Tier Discovery...`);
-            
             let selectedTarget = null;
 
             const tier1NichePool = [
@@ -475,19 +446,7 @@ async function pollAndDiscoverExternalTasks() {
                 { sector: 'Automated Sports Analytics & Webhook Dispatch', url: 'https://rapidapi.com/', value: 1.00 }
             ];
 
-            const fetchTier1Success = Math.random() > 0.15;
-            if (fetchTier1Success) {
-                selectedTarget = tier1NichePool[Math.floor(Math.random() * tier1NichePool.length)];
-                console.log(`🎯 [Tier 1 Hit] Acquired task from your locked-in service gap niches.`);
-            } else {
-                console.log(`🔄 [Tier 1 Dry] Cascading to Tier 2 (Global Infrastructure Pools)...`);
-                const tier2GlobalPool = [
-                    { sector: 'Global Sector - Web Content Indexing', url: 'https://www.google.com/', value: 1.00 },
-                    { sector: 'Global Sector - Edge Delivery Node', url: 'https://www.cloudflare.com/', value: 1.15 },
-                    { sector: 'Global Sector - Open Knowledge Sync', url: 'https://www.wikipedia.org/', value: 1.00 }
-                ];
-                selectedTarget = tier2GlobalPool[Math.floor(Math.random() * tier2GlobalPool.length)];
-            }
+            selectedTarget = tier1NichePool[Math.floor(Math.random() * tier1NichePool.length)];
 
             const newDiscoveredTask = {
                 id: `task-${Date.now().toString().slice(-6)}`,
@@ -501,7 +460,6 @@ async function pollAndDiscoverExternalTasks() {
             tasks.push(newDiscoveredTask);
             dbData.tasks = tasks;
             fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
-            console.log(`✨ [Discovered & Ingested] ID: ${newDiscoveredTask.id} | Sector: ${newDiscoveredTask.sector}`);
         }
 
         const pendingIndex = tasks.findIndex(t => t.status === 'pending');
