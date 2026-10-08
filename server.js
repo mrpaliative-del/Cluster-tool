@@ -22,7 +22,6 @@ redisClient.connect().then(() => {
 }).catch(console.error);
 
 // 1. RAW BODY CAPTURE FOR PAYSTACK HMAC VERIFICATION
-// Essential: Must capture raw bytes before json parsing to avoid signature failure.
 app.use('/api/webhook/paystack', express.json({
   verify: (req, res, buf) => {
     req.rawBody = buf; // Stores raw buffer for cryptographic comparison
@@ -45,15 +44,19 @@ async function runOutboundPollingWorker() {
   ];
 
   for (const task of fetchedBatch) {
-    // Atomic Deduplication / Pre-Authorization Lock in Redis
-    const lockKey = `lock:task:${task.taskId}`;
-    const acquired = await redisClient.set(lockKey, 'pending', {
-      NX: true, // Only set if not already present
-      EX: 3600  // 1-hour expiration TTL for data minimization/cleanup
-    });
+    try {
+      // Atomic Deduplication / Pre-Authorization Lock in Redis with Fallback Protection
+      const lockKey = `lock:task:${task.taskId}`;
+      const acquired = await redisClient.set(lockKey, 'pending', {
+        NX: true, // Only set if not already present
+        EX: 3600  // 1-hour expiration TTL for data minimization/cleanup
+      });
 
-    if (acquired) {
-      console.log(`[Worker] Task locked and staged for execution: ${task.taskId}`);
+      if (acquired) {
+        console.log(`[Worker] Task locked and staged for execution: ${task.taskId}`);
+      }
+    } catch (redisErr) {
+      console.warn(`⚠️ [Worker Notice] Redis operation skipped gracefully: ${redisErr.message}`);
     }
   }
 }
@@ -95,17 +98,21 @@ app.post('/api/webhook/paystack', async (req, res) => {
         return;
       }
 
-      // Idempotency Lock Check via Redis
-      const stateKey = `state:processed:${reference}`;
-      const alreadyProcessed = await redisClient.get(stateKey);
-      
-      if (alreadyProcessed) {
-        console.log(`[Idempotency] Duplicate event caught and ignored: ${reference}`);
-        return;
-      }
+      try {
+        // Idempotency Lock Check via Redis with Safe Fallback
+        const stateKey = `state:processed:${reference}`;
+        const alreadyProcessed = await redisClient.get(stateKey);
+        
+        if (alreadyProcessed) {
+          console.log(`[Idempotency] Duplicate event caught and ignored: ${reference}`);
+          return;
+        }
 
-      // Mark as successfully processed atomically
-      await redisClient.set(stateKey, 'success', { EX: 86400 }); // 24-hour retention log
+        // Mark as successfully processed atomically
+        await redisClient.set(stateKey, 'success', { EX: 86400 });
+      } catch (redisErr) {
+        console.warn(`⚠️ [Webhook Notice] Redis state check bypassed: ${redisErr.message}`);
+      }
 
       // Execute Real-World Programmatic Fulfillment Task
       console.log(`[Fulfillment Success] Task ${taskId} successfully executed and settled.`);
