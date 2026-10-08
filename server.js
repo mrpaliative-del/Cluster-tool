@@ -87,6 +87,7 @@ async function safeRedisPop(queueName) {
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
 const CLUSTER_SECRET = process.env.CLUSTER_SECRET || 'your-cluster-hmac-secret';
 const TARGET_SITEMAP_URL = process.env.TARGET_SITEMAP_URL || '';
+const PRODUCTION_BASE_URL = process.env.PRODUCTION_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://cluster-tool.onrender.com';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 
@@ -120,7 +121,7 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
-    service: 'Autonomous High-Velocity 4-Pillar Compliance Cluster with Telegram',
+    service: 'Autonomous Real-World Compliance Cluster',
     mode: redisDegraded ? 'In-Memory Fallback Active' : 'Standard Redis Connected',
     timestamp: new Date().toISOString()
   });
@@ -232,7 +233,6 @@ async function auditRedirectChain(task, page) {
 async function auditOpenGraphTags(task, page) {
   const response = await page.goto(task.targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
   
-  // FIXED: Evaluated safely inside browser DOM context
   const evaluation = await page.evaluate(() => {
     const tags = {};
     document.querySelectorAll('meta').forEach(meta => {
@@ -295,47 +295,51 @@ async function executeTaskRouter(task, page) {
 }
 
 // ==========================================
-// AUTONOMOUS TASK FEEDER (Optimized Interval)
+// ACTIVE REAL-WORLD PRODUCTION FEEDER
 // ==========================================
 async function runSelfDiscoveryFeeder() {
   try {
     let discoveredUrls = [];
 
+    // 1. Try pulling from Sitemap if configured
     if (TARGET_SITEMAP_URL) {
       try {
         const res = await fetch(TARGET_SITEMAP_URL);
         const xmlText = await res.text();
         const matches = xmlText.match(/<loc>(.*?)<\/loc>/g);
-        if (matches) {
-          discoveredUrls = matches.map(m => m.replace(/<\/?loc>/g, '')).slice(0, 5);
+        if (matches && matches.length > 0) {
+          discoveredUrls = matches.map(m => m.replace(/<\/?loc>/g, '')).slice(0, 10);
         }
       } catch (e) {}
     }
 
-    if (discoveredUrls.length === 0) {
+    // 2. If no sitemap or empty, actively target real production deployment endpoints
+    if (discoveredUrls.length === 0 && PRODUCTION_BASE_URL) {
       discoveredUrls = [
-        'https://example.com/travel/flight-deal',
-        'https://example.com/checkout'
+        PRODUCTION_BASE_URL,
+        `${PRODUCTION_BASE_URL}/`
       ];
     }
 
-    for (const url of discoveredUrls) {
-      const task = {
-        batchId: `auto_feeder_${Date.now()}`,
-        taskId: `auto_${Math.random().toString(36).substring(7)}`,
-        type: url.includes('checkout') ? 'widget_liveness' : 'seo_og_drift',
-        targetUrl: url,
-        expectedMarker: 'og:image',
-        selector: 'iframe',
-        timestamp: Date.now()
-      };
-      await safeRedisPush('tasks:verified_queue', JSON.stringify(task));
+    if (discoveredUrls.length > 0) {
+      for (const url of discoveredUrls) {
+        const task = {
+          batchId: `prod_sync_${Date.now()}`,
+          taskId: `live_${Math.random().toString(36).substring(7)}`,
+          type: 'mixed_content',
+          targetUrl: url,
+          expectedMarker: null,
+          selector: null,
+          timestamp: Date.now()
+        };
+        await safeRedisPush('tasks:verified_queue', JSON.stringify(task));
+      }
+      console.log(`🌐 [Feeder] Queued ${discoveredUrls.length} live production targets for active auditing.`);
     }
   } catch (err) {
-    console.error('❌ [Autonomous Feeder Error]', err.message);
+    console.error('❌ [Production Feeder Error]', err.message);
   }
 
-  // Adjusted to 60 seconds to protect API and Redis request limits
   setTimeout(runSelfDiscoveryFeeder, 60 * 1000);
 }
 
@@ -350,7 +354,7 @@ async function runAuditSpooler() {
     }
 
     const task = JSON.parse(rawTask);
-    console.log(`🔍 [Processing Task] ID: ${task.taskId} | Type: ${task.type} \vert{} URL:${task.targetUrl}`);
+    console.log(`🔍 [Processing Production Task] ID: ${task.taskId} | Type: ${task.type} \vert{} URL:${task.targetUrl}`);
     
     const browser = await getSharedBrowser();
     context = await browser.newContext({
@@ -362,16 +366,16 @@ async function runAuditSpooler() {
     await context.close();
 
     if (!auditResult.success) {
-      console.warn(`⚠️ [Compliance Failure Detected] Task ${task.taskId} (${task.type}) failed verification.`);
+      console.warn(`⚠️ [Production Compliance Failure] Task ${task.taskId} (${task.type}) failed verification.`);
       await sendTelegramAlert(
-        `🚨 *Compliance Failure Detected*\n\n` +
+        `🚨 *Production Compliance Failure*\n\n` +
         `• *Pillar:* \`${task.type}\`\n` +
         `• *Target:* \`${task.targetUrl}\`\n` +
         `• *Task ID:* \`${task.taskId}\`\n` +
         `• *Status:* \`Failed / Non-Compliant\``
       );
     } else {
-      console.log(`✅ [Audit Passed] Task ${task.taskId} (${task.type}) verified successfully.`);
+      console.log(`✅ [Audit Passed] Production task ${task.taskId} (${task.type}) verified successfully.`);
     }
 
   } catch (err) {
@@ -382,11 +386,11 @@ async function runAuditSpooler() {
   setTimeout(runAuditSpooler, 1000);
 }
 
-// Kick off autonomous loops on boot
+// Kick off loops on boot
 setTimeout(runSelfDiscoveryFeeder, 5000);
 setTimeout(runAuditSpooler, 2000);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Autonomous Compliance Cluster active on port ${PORT}`);
+  console.log(`Real-World Production Compliance Cluster active on port ${PORT}`);
 });
