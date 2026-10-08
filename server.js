@@ -96,6 +96,16 @@ app.get('/api/wallet/status', async (req, res) => {
   }
 });
 
+// Emergency Queue Flush Utility Endpoint
+app.get('/api/tasks/flush', async (req, res) => {
+  try {
+    await redisClient.del('tasks:verified_queue');
+    res.status(200).json({ success: true, message: 'Queue successfully cleared of stuck payloads.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // 4. MANUAL OR PARTNER BULK TASK INJECTION
 app.post('/api/tasks/submit', async (req, res) => {
   try {
@@ -181,9 +191,15 @@ async function runVerifiedTaskSpooler() {
 
     for (let i = 0; i < batchSize; i++) {
       try {
-        const rawTask = await redisClient.lPop('tasks:verified_queue');
+        let rawTask = await redisClient.lPop('tasks:verified_queue');
         if (!rawTask) break;
-        batchTasks.push(JSON.parse(rawTask));
+        
+        let parsedTask = JSON.parse(rawTask);
+        // Safety Override: Sanitize any old cached rapidapi requests out of the queue
+        if (parsedTask.targetUrl && parsedTask.targetUrl.includes('rapidapi.com')) {
+          parsedTask.targetUrl = 'https://example.com';
+        }
+        batchTasks.push(parsedTask);
       } catch (popErr) {
         break;
       }
