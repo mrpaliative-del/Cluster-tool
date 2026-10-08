@@ -73,28 +73,38 @@ async function storePop() {
   return item; 
 }
 
-// TELEGRAM TELEMETRY ALERT DISPATCHER
+// TELEGRAM TELEMETRY ALERT DISPATCHER (Robust & Safe Plain Text)
 async function sendTelegramAlert(title, task, result) {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+    console.warn('⚠️ [Telegram] Skipped alert: Token or Chat ID is missing in environment variables.');
+    return;
+  }
   
   const icon = result.success ? '✅' : '🚨';
   const text = 
-    `${icon} *${title}*\n\n` +
-    `• *Target URL:* \`${task.targetUrl}\`\n` +
-    `• *Final Status:* \`${result.finalStatus || 'N/A'}\`\n` +
-    `• *Marker Survived:* \`${result.markerSurvived ? 'Yes (Protected)' : '❌ STRIPPED'}\`\n` +
-    `• *Redirect Hops:* \`${result.hopCount}\`\n` +
-    `• *Estimated Value:* \`$${task.estimatedValueUSD}\`\n` +
-    `• *Timestamp:* \`${new Date().toISOString()}\``;
+    `${icon} ${title}\n\n` +
+    `• Target URL: ${task.targetUrl}\n` +
+    `• Final Status: ${result.finalStatus || 'N/A'}\n` +
+    `• Marker Survived: ${result.markerSurvived ? 'Yes (Protected)' : 'STRIPPED'}\n` +
+    `• Redirect Hops: ${result.hopCount}\n` +
+    `• Estimated Value: $${task.estimatedValueUSD}\n` +
+    `• Timestamp: ${new Date().toISOString()}`;
 
   try {
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: text, parse_mode: 'Markdown' })
+      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: text })
     });
+
+    const data = await response.json();
+    if (!data.ok) {
+      console.error('❌ [Telegram API Error Description]', data.description);
+    } else {
+      console.log(`📤 [Telegram] Alert successfully dispatched for ${task.targetUrl}`);
+    }
   } catch (err) {
-    console.error('❌ [Telegram Error]', err.message);
+    console.error('❌ [Telegram Network Error]', err.message);
   }
 }
 
@@ -273,6 +283,15 @@ async function runArbitrageWorker(workerId) {
 setTimeout(runAutonomousDiscovery, 3000);
 setTimeout(() => runArbitrageWorker(1), 5000);
 setTimeout(() => runArbitrageWorker(2), 7000);
+
+// Immediate startup test ping to verify Telegram connectivity
+setTimeout(async () => {
+  await sendTelegramAlert(
+    'Cluster Online & Telemetry Active', 
+    { targetUrl: 'https://cluster-tool.onrender.com' }, 
+    { success: true, finalStatus: 200, markerSurvived: true, hopCount: 1, estimatedValueUSD: 0 }
+  );
+}, 4000);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
