@@ -60,16 +60,29 @@ async function storePop() {
   return item; 
 }
 
-// TELEGRAM TELEMETRY ALERT DISPATCHER
-async function sendTelegramAlert(text) {
+// TELEGRAM TELEMETRY ALERT DISPATCHER (Enhanced)
+async function sendTelegramAlert(title, task, result) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+  
+  const icon = result.success ? '✅' : '🚨';
+  const text = 
+    `${icon} *${title}*\n\n` +
+    `• *Target URL:* \`${task.targetUrl}\`\n` +
+    `• *Final Status:* \`${result.finalStatus || 'N/A'}\`\n` +
+    `• *Marker Survived:* \`${result.markerSurvived ? 'Yes (Protected)' : '❌ STRIPPED'}\`\n` +
+    `• *Redirect Hops:* \`${result.hopCount}\`\n` +
+    `• *Estimated Value:* \`$${task.estimatedValueUSD}\`\n` +
+    `• *Timestamp:* \`${new Date().toISOString()}\``;
+
   try {
     await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: text, parse_mode: 'Markdown' })
     });
-  } catch (err) {}
+  } catch (err) {
+    console.error('❌ [Telegram Error]', err.message);
+  }
 }
 
 app.use(express.json());
@@ -86,42 +99,84 @@ app.get('/', (req, res) => {
 });
 
 // ==========================================
-// AUTONOMOUS TARGET DISCOVERY ENGINE
+// FULLY AUTONOMOUS PUBLIC DOMAIN DISCOVERY ENGINE
 // ==========================================
 async function runAutonomousDiscovery() {
   try {
-    console.log(`📡 [Discovery Engine] Scanning public domain vectors for affiliate opportunities...`);
+    console.log(`📡 [Discovery Engine] Sweeping public domain vectors for travel & affiliate opportunities...`);
     
-    // Inject dynamic search & partner audit flows using your real affiliate marker
-    const generatedTargets = [
-      {
-        targetUrl: `https://www.aviasales.com/search/LOS0112ABV1?marker=${AFFILIATE_MARKER}`,
-        requiredMarker: AFFILIATE_MARKER,
-        estimatedValueUSD: 85
-      }
+    // Public search footprints targeting travel directories, blogs, and flight guides
+    const publicSearchQueries = [
+      'https://html.duckduckgo.com/html/?q=travel+booking+resources+blog',
+      'https://html.duckduckgo.com/html/?q=flight+aggregator+partners+directory',
+      'https://html.duckduckgo.com/html/?q=cheap+flights+booking+tools+review'
     ];
 
-    for (const t of generatedTargets) {
-      const exists = localData.queue.some(item => item.includes(t.targetUrl));
-      if (!exists && localData.queue.length < 30) {
-        const task = {
-          batchId: `auto_${Date.now()}`,
-          taskId: `arb_${Math.random().toString(36).substring(7)}`,
-          type: 'affiliate_arbitrage_audit',
-          targetUrl: t.targetUrl,
-          requiredMarker: t.requiredMarker,
-          estimatedValueUSD: t.estimatedValueUSD,
-          timestamp: Date.now()
-        };
-        await storePush(JSON.stringify(task));
+    const randomQueryUrl = publicSearchQueries[Math.floor(Math.random() * publicSearchQueries.length)];
+    
+    const res = await fetch(randomQueryUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+      }
+    });
+
+    if (!res.ok) throw new Error(`Public search discovery failed with status ${res.status}`);
+    const htmlText = await res.text();
+
+    // Extract external http/https result URLs from public search snippets
+    const linkMatches = htmlText.match(/class="result__url"[^>]*><span>(.*?)<\/span>/g);
+    
+    let discoveredCount = 0;
+    if (linkMatches && linkMatches.length > 0) {
+      for (const match of linkMatches) {
+        const cleanUrl = match.replace(/<\/?span>/g, '').replace(/class="result__url"/g, '').replace(/<[^>]*>/g, '').trim();
+        const fullTargetUrl = cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`;
+
+        // Ensure we target valid external pages and avoid duplicates in the local queue
+        const exists = localData.queue.some(item => item.includes(fullTargetUrl));
+        if (!exists && localData.queue.length < 40 && !fullTargetUrl.includes('duckduckgo') && !fullTargetUrl.includes('aviasales')) {
+          
+          const targetUrlWithMarker = `${fullTargetUrl}${fullTargetUrl.includes('?') ? '&' : '?'}marker=${AFFILIATE_MARKER}`;
+
+          const task = {
+            batchId: `auto_public_${Date.now()}`,
+            taskId: `arb_${Math.random().toString(36).substring(7)}`,
+            type: 'affiliate_arbitrage_audit',
+            targetUrl: targetUrlWithMarker,
+            requiredMarker: AFFILIATE_MARKER,
+            estimatedValueUSD: 75,
+            timestamp: Date.now()
+          };
+          
+          await storePush(JSON.stringify(task));
+          discoveredCount++;
+        }
       }
     }
+
+    // Fallback core target if public scrape returns empty due to rate limits
+    if (discoveredCount === 0) {
+      const fallbackUrl = `https://www.aviasales.com/search/LOS0112ABV1?marker=${AFFILIATE_MARKER}`;
+      if (!localData.queue.some(item => item.includes(fallbackUrl))) {
+        await storePush(JSON.stringify({
+          batchId: `auto_fallback_${Date.now()}`,
+          taskId: `arb_${Math.random().toString(36).substring(7)}`,
+          type: 'affiliate_arbitrage_audit',
+          targetUrl: fallbackUrl,
+          requiredMarker: AFFILIATE_MARKER,
+          estimatedValueUSD: 85,
+          timestamp: Date.now()
+        }));
+      }
+    }
+
+    console.log(`🚀 [Discovery Engine] Injected ${discoveredCount} public domain targets into queue.`);
   } catch (err) {
     console.error('❌ [Discovery Error]', err.message);
   }
 
-  // Run autonomous discovery cycle every 30 minutes
-  setTimeout(runAutonomousDiscovery, 30 * 60 * 1000);
+  // Rapid discovery cycle set to every 30 seconds (30000 ms)
+  setTimeout(runAutonomousDiscovery, 30 * 1000);
 }
 
 // ==========================================
@@ -191,13 +246,7 @@ async function runArbitrageWorker() {
 
     if (!result.success) {
       console.warn(`💰 [Monetary Leak Identified!] Risk on ${task.targetUrl} ($${task.estimatedValueUSD})`);
-      await sendTelegramAlert(
-        `🚨 *Monetary Leakage / Arbitrage Alert*\n\n` +
-        `• *Target:* \`${task.targetUrl}\`\n` +
-        `• *Final URL:* \`${result.finalUrl || 'N/A'}\`\n` +
-        `• *Marker Survived:* \`${result.markerSurvived ? 'Yes' : '❌ STRIPPED'}\`\n` +
-        `• *Risk Value:* \`$${task.estimatedValueUSD}\``
-      );
+      await sendTelegramAlert('Monetary Leakage / Arbitrage Alert', task, result);
     } else {
       console.log(`✅ [Route Secured] Tracking marker intact. Value protected: $${task.estimatedValueUSD}`);
     }
