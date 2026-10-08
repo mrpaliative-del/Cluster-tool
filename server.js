@@ -15,26 +15,23 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 const AFFILIATE_MARKER = process.env.TRAVELPAYOUTS_MARKER || 'default_marker';
 
 // ==========================================
-// MULTI-VERTICAL TRAVEL ASSET MATRIX (Travelpayouts Ecosystem)
+// UNIFIED MULTI-VERTICAL AFFILIATE ASSET MATRIX
 // ==========================================
-const TRAVEL_ASSET_MATRIX = [
-  // Flight Corridors (Aviasales)
+const AFFILIATE_ASSET_MATRIX = [
+  // --- Travel Verticals (Aviasales & Hotellook) ---
   { vertical: 'flight', path: 'search/LOS0112ABV1', value: 85, region: 'Flight (Lagos - Abuja)' },
-  { vertical: 'flight', path: 'search/LOS1012ACC1', value: 120, region: 'Flight (Lagos - Accra)' },
-  { vertical: 'flight', path: 'search/LOS1512JNB1', value: 210, region: 'Flight (Lagos - Johannesburg)' },
   { vertical: 'flight', path: 'search/LOS2012LHR1', value: 350, region: 'Flight (Lagos - London)' },
   { vertical: 'flight', path: 'search/LOS2212DXB1', value: 320, region: 'Flight (Lagos - Dubai)' },
-  { vertical: 'flight', path: 'search/ABV2512IST1', value: 290, region: 'Flight (Abuja - Istanbul)' },
-  { vertical: 'flight', path: 'search/LOS0512JFK1', value: 450, region: 'Flight (Lagos - New York)' },
-
-  // Hotel Corridors (Hotellook / Accommodation)
   { vertical: 'hotel', path: 'hotels/destination/Lagos_Nigeria', value: 180, region: 'Hotel Stay (Lagos Hub)' },
-  { vertical: 'hotel', path: 'hotels/destination/Abuja_Nigeria', value: 150, region: 'Hotel Stay (Abuja Hub)' },
   { vertical: 'hotel', path: 'hotels/destination/London_UK', value: 420, region: 'Hotel Stay (London Hub)' },
-  { vertical: 'hotel', path: 'hotels/destination/Dubai_UAE', value: 380, region: 'Hotel Stay (Dubai Hub)' },
 
-  // Car Rental Corridors (Rentalcars / Transport)
-  { vertical: 'car', path: 'rentacar/search/Lagos_Airport', value: 110, region: 'Car Rental (Lagos Hub)' }
+  // --- E-Commerce & Tech Hardware (Amazon) ---
+  { vertical: 'retail', path: 's?k=developer+laptop+stand', value: 45, region: 'Tech Hardware (Amazon Hub)' },
+  { vertical: 'retail', path: 's?k=portable+monitor+usb+c', value: 95, region: 'Tech Gear (Retail Hub)' },
+
+  // --- Cloud Hosting & Developer Tools (SaaS) ---
+  { vertical: 'saas', domain: 'https://www.digitalocean.com/?ref=', path: AFFILIATE_MARKER, value: 50, region: 'Cloud Infrastructure (DigitalOcean)' },
+  { vertical: 'saas', domain: 'https://www.siteground.com/gohome?a_id=', path: AFFILIATE_MARKER, value: 100, region: 'Managed Cloud Hosting' }
 ];
 
 // ==========================================
@@ -112,7 +109,7 @@ async function sendTelegramAlert(title, task, result) {
     `${icon} ${title}\n\n` +
     `• Target URL: ${task.targetUrl}\n` +
     `• Final Status: ${result.finalStatus || 'N/A'}\n` +
-    `• Marker Survived: ${result.markerSurvived ? 'Yes (Protected)' : 'STRIPPED'}\n` +
+    `• Attribution Survived: ${result.markerSurvived ? 'Yes (Protected)' : 'STRIPPED'}\n` +
     `• Redirect Hops: ${result.hopCount}\n` +
     `• Estimated Value: $${task.estimatedValueUSD}\n` +
     `• Timestamp: ${new Date().toISOString()}`;
@@ -143,9 +140,9 @@ async function sendDailySummaryReport() {
   const text = 
     `📊 *Autonomous Cluster 24-Hour Guardian Report*\n\n` +
     `• Uptime Window: ${uptimeHours} hours\n` +
-    `• Total Routes Audited: ${dailyStats.auditsCompleted}\n` +
+    `• Total Assets Audited: ${dailyStats.auditsCompleted}\n` +
     `• Total Revenue Protected: $${dailyStats.valueProtectedUSD}\n` +
-    `• Monetary Leaks Caught: ${dailyStats.leaksIdentified}\n` +
+    `• Attribution Leaks Caught: ${dailyStats.leaksIdentified}\n` +
     `• Cluster Status: Operational & Secured`;
 
   try {
@@ -169,8 +166,8 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
-    service: 'Autonomous Headless Multi-Vertical Arbitrage Cluster',
-    activeMarker: AFFILIATE_MARKER ? 'Configured & Secured' : 'Missing Marker',
+    service: 'Autonomous Headless Multi-Vertical Affiliate Cluster',
+    activeToken: AFFILIATE_MARKER ? 'Configured & Secured' : 'Missing Token',
     queueLength: localData.queue.length,
     stats: dailyStats,
     timestamp: new Date().toISOString()
@@ -183,69 +180,22 @@ app.get('/', (req, res) => {
 async function runAutonomousDiscovery() {
   let discoveredCount = 0;
 
-  try {
-    console.log(`📡 [Discovery Engine] Sweeping public domain vectors for travel & affiliate opportunities...`);
-    
-    const publicSearchQueries = [
-      'https://html.duckduckgo.com/html/?q=travel+booking+resources+blog',
-      'https://html.duckduckgo.com/html/?q=flight+aggregator+partners+directory'
-    ];
-
-    const randomQueryUrl = publicSearchQueries[Math.floor(Math.random() * publicSearchQueries.length)];
-    
-    const res = await fetch(randomQueryUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml'
-      }
-    });
-
-    if (res.ok) {
-      const htmlText = await res.text();
-      const linkMatches = htmlText.match(/class="result__url"[^>]*><span>(.*?)<\/span>/g);
-      
-      if (linkMatches && linkMatches.length > 0) {
-        for (const match of linkMatches) {
-          const cleanUrl = match.replace(/<\/?span>/g, '').replace(/class="result__url"/g, '').replace(/<[^>]*>/g, '').trim();
-          const fullTargetUrl = cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`;
-
-          const exists = localData.queue.some(item => item.includes(fullTargetUrl));
-          if (!exists && localData.queue.length < 40 && !fullTargetUrl.includes('duckduckgo') && !fullTargetUrl.includes('aviasales') && !fullTargetUrl.includes('hotellook')) {
-            const targetUrlWithMarker = `${fullTargetUrl}${fullTargetUrl.includes('?') ? '&' : '?'}marker=${AFFILIATE_MARKER}`;
-            const task = {
-              batchId: `auto_public_${Date.now()}`,
-              taskId: `arb_${Math.random().toString(36).substring(7)}`,
-              type: 'affiliate_arbitrage_audit',
-              targetUrl: targetUrlWithMarker,
-              requiredMarker: AFFILIATE_MARKER,
-              estimatedValueUSD: 75,
-              timestamp: Date.now()
-            };
-            await storePush(JSON.stringify(task));
-            discoveredCount++;
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.warn(`⚠️ [Discovery Notice] Public network sweep restricted on cloud IP. Switching to multi-vertical asset matrix.`);
-  }
-
-  // Guaranteed resilient fallback: Pulls from multi-vertical Travelpayouts matrix
-  if (discoveredCount === 0 && localData.queue.length < 25) {
-    const asset = TRAVEL_ASSET_MATRIX[Math.floor(Math.random() * TRAVEL_ASSET_MATRIX.length)];
+  if (localData.queue.length < 25) {
+    const asset = AFFILIATE_ASSET_MATRIX[Math.floor(Math.random() * AFFILIATE_ASSET_MATRIX.length)];
     
     let fallbackUrl = '';
     if (asset.vertical === 'flight') {
       fallbackUrl = `https://www.aviasales.com/${asset.path}?marker=${AFFILIATE_MARKER}`;
     } else if (asset.vertical === 'hotel') {
       fallbackUrl = `https://www.hotellook.com/${asset.path}?marker=${AFFILIATE_MARKER}`;
-    } else {
-      fallbackUrl = `https://www.rentalcars.com/${asset.path}?marker=${AFFILIATE_MARKER}`;
+    } else if (asset.vertical === 'retail') {
+      fallbackUrl = `https://www.amazon.com/${asset.path}&tag=${AFFILIATE_MARKER}`;
+    } else if (asset.vertical === 'saas') {
+      fallbackUrl = `${asset.domain}${asset.path}`;
     }
 
     const exists = localData.queue.some(item => item.includes(fallbackUrl));
-    if (!exists) {
+    if (!exists && fallbackUrl) {
       await storePush(JSON.stringify({
         batchId: `auto_matrix_${Date.now()}`,
         taskId: `arb_${Math.random().toString(36).substring(7)}`,
@@ -256,6 +206,7 @@ async function runAutonomousDiscovery() {
         timestamp: Date.now()
       }));
       console.log(`🚀 [Discovery Engine] Injected [${asset.region}] audit target ($${asset.value})`);
+      discoveredCount++;
     }
   }
 
@@ -276,15 +227,18 @@ async function getSharedBrowser() {
   return sharedBrowser;
 }
 
-// Precise Parameter-Level Marker Verification
-function verifyAffiliateMarker(finalUrl, requiredMarker) {
+// Precise Parameter-Level Attribution Verification (Supports marker, tag, and ref)
+function verifyAttributionMarker(finalUrl, requiredMarker) {
   if (!requiredMarker) return true;
   try {
     const parsedFinal = new URL(finalUrl);
     const markerParam = parsedFinal.searchParams.get('marker');
-    return markerParam === requiredMarker;
+    const tagParam = parsedFinal.searchParams.get('tag');
+    const refParam = parsedFinal.searchParams.get('ref');
+    const aidParam = parsedFinal.searchParams.get('a_id');
+    return markerParam === requiredMarker || tagParam === requiredMarker || refParam === requiredMarker || aidParam === requiredMarker;
   } catch (err) {
-    return finalUrl.includes(`marker=${requiredMarker}`);
+    return finalUrl.includes(requiredMarker);
   }
 }
 
@@ -301,7 +255,7 @@ async function auditArbitrageTarget(task, page) {
   const finalUrl = page.url();
   const finalStatus = response ? response.status() : 0;
 
-  const markerSurvived = verifyAffiliateMarker(finalUrl, task.requiredMarker);
+  const markerSurvived = verifyAttributionMarker(finalUrl, task.requiredMarker);
   const isHealthy = finalStatus < 400 && markerSurvived;
 
   return {
@@ -341,8 +295,8 @@ async function runArbitrageWorker(workerId) {
       console.log(`✅ [Worker #${workerId}] Target Secured. Value protected: $${task.estimatedValueUSD}`);
     } else {
       dailyStats.leaksIdentified++;
-      console.warn(`💰 [Worker #${workerId}] Monetary Leak Identified on ${task.targetUrl} ($${task.estimatedValueUSD})`);
-      await sendTelegramAlert('Monetary Leakage / Arbitrage Alert', task, result);
+      console.warn(`💰 [Worker #${workerId}] Attribution Leak Identified on ${task.targetUrl} ($${task.estimatedValueUSD})`);
+      await sendTelegramAlert('Attribution Leak / Arbitrage Alert', task, result);
     }
 
   } catch (err) {
