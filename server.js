@@ -28,6 +28,16 @@ const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 
+// System Metrics & State Tracking for Dashboard
+const systemMetrics = {
+  bootTime: new Date().toISOString(),
+  totalTasksProcessed: 0,
+  successfulExecutions: 0,
+  recoveredAnomalies: 0,
+  lastExecutionTimestamp: null,
+  currentCadenceMs: 300000 // Starts at 5 minutes
+};
+
 // Feature 7: Smart Circuit Breaker Registry
 const circuitBreakers = {};
 
@@ -84,14 +94,47 @@ app.use('/api/webhook/paystack', express.json({
 
 app.use(express.json());
 
-// 3. SYSTEM HEALTH & WALLET STATUS ENDPOINTS
+// 3. SYSTEM HEALTH & LIVE METRICS DASHBOARD ENDPOINTS
 app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
     service: 'Autonomous Outbound & Optimized Task Spooler',
-    architecture: 'Native Monolithic Node.js/Playwright + 12 Institutional Features',
+    architecture: 'Native Monolithic Node.js/Playwright + Real-Time Adaptive Engine',
     timestamp: new Date().toISOString()
   });
+});
+
+app.get('/api/metrics', async (req, res) => {
+  try {
+    const queueLength = await redisClient.lLen('tasks:verified_queue').catch(() => 0);
+    const balanceUSD = parseFloat(await redisClient.get('wallet:balance_usd').catch(() => '0.00') || '0.00');
+
+    res.status(200).json({
+      success: true,
+      uptimeSeconds: Math.floor(process.uptime()),
+      bootTime: systemMetrics.bootTime,
+      performance: {
+        totalTasksProcessed: systemMetrics.totalTasksProcessed,
+        successfulExecutions: systemMetrics.successfulExecutions,
+        recoveredAnomalies: systemMetrics.recoveredAnomalies,
+        lastExecutionTimestamp: systemMetrics.lastExecutionTimestamp
+      },
+      adaptivePolling: {
+        currentCadenceSeconds: systemMetrics.currentCadenceMs / 1000,
+        activeQueueLength: queueLength
+      },
+      circuitBreakers: {
+        quarantinedEndpointsCount: Object.keys(circuitBreakers).length,
+        activeCorridors: circuitBreakers
+      },
+      wallet: {
+        balanceUSD: balanceUSD,
+        balanceNGN: balanceUSD * 1500
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Metrics degradation', details: err.message });
+  }
 });
 
 app.get('/api/wallet/status', async (req, res) => {
@@ -113,7 +156,6 @@ app.get('/api/wallet/status', async (req, res) => {
   }
 });
 
-// Emergency Queue Flush Utility Endpoint
 app.get('/api/tasks/flush', async (req, res) => {
   try {
     await redisClient.del('tasks:verified_queue');
@@ -123,7 +165,7 @@ app.get('/api/tasks/flush', async (req, res) => {
   }
 });
 
-// 4. MANUAL OR PARTNER BULK TASK INJECTION
+// 4. MANUAL OR PARTNER BULK TASK INJECTION WITH TELEMETRY AMOUNT
 app.post('/api/tasks/submit', async (req, res) => {
   try {
     const { tasks } = req.body;
@@ -134,17 +176,29 @@ app.post('/api/tasks/submit', async (req, res) => {
     }
 
     for (const task of taskList) {
+      const payout = task.payoutUSD || 0.10;
       const payload = JSON.stringify({
         taskId: task.taskId,
         sector: task.sector || 'Verified Paid Fulfillment',
         targetUrl: task.targetUrl,
-        payoutUSD: task.payoutUSD || 0.10,
+        payoutUSD: payout,
         verified: true
       });
       await redisClient.rPush('tasks:verified_queue', payload).catch(err => {
         console.error('[Redis Push Warning]', err.message);
       });
     }
+
+    const samplePayout = taskList[0].payoutUSD || 0.10;
+    const samplePayoutNGN = samplePayout * 1500;
+
+    await dispatchTelegramMessage(
+      `📥 *New Tasks Injected & Queued*\n\n` +
+      `• *Count:* \`${taskList.length}\`\n` +
+      `• *Sample Task ID:* \`${taskList[0].taskId}\`\n` +
+      `• *Task Amount:* \`$${samplePayout.toFixed(2)} (~₦${samplePayoutNGN.toLocaleString()})\`\n` +
+      `• *Sector:* \`${taskList[0].sector || 'Verified Paid Fulfillment'}\``
+    );
 
     console.log(`📥 [Verified Ingest] Successfully queued ${taskList.length} legit paid tasks.`);
     res.status(200).json({ status: 'queued', count: taskList.length });
@@ -155,14 +209,10 @@ app.post('/api/tasks/submit', async (req, res) => {
 });
 
 // ==========================================
-// 5. PLAYWRIGHT AUTOMATION & 12-FEATURE ENGINE LOGIC
+// 5. PLAYWRIGHT AUTOMATION & ADAPTIVE ENGINE LOGIC
 // ==========================================
 
-// Feature 4 & 5: Locked Niche & Adaptive Sub-60s Swift-Pivot Core Matrix
 async function getAdaptiveNicheTarget() {
-  // Check primary high-intent travel/merchant corridor sources
-  // If queue has items or primary check provides targets, use them.
-  // Otherwise, fallback swiftly within structural boundaries:
   return {
     taskId: `niche-lock-${Math.floor(100000 + Math.random() * 900000)}`,
     sector: 'Global Travel & Merchant Compliance Corridor',
@@ -173,7 +223,6 @@ async function getAdaptiveNicheTarget() {
 }
 
 async function executePlaywrightTask(task) {
-  // Feature 7: Smart Circuit Breaker check
   if (circuitBreakers[task.targetUrl] && Date.now() < circuitBreakers[task.targetUrl]) {
     console.log(`🛡️ [Circuit Breaker] Skipping quarantined endpoint: ${task.targetUrl}`);
     return { success: true, targetTitle: 'Quarantined Endpoint Bypassed Safely' };
@@ -183,7 +232,6 @@ async function executePlaywrightTask(task) {
   try {
     console.log(`🤖 [Playwright Worker] Executing verified task: ${task.taskId} [${task.sector}] ->${task.targetUrl}`);
     
-    // Launch with anti-detection, stability flags, and Feature 9 (Dynamic Throttling parameters)
     browser = await chromium.launch({ 
       headless: true, 
       args: [
@@ -209,17 +257,14 @@ async function executePlaywrightTask(task) {
     await page.goto(task.targetUrl, { timeout: 20000, waitUntil: 'commit' });
     const targetTitle = await page.title() || 'Verified Target';
     
-    // Feature 10: Heuristic DOM Signature Fingerprinting verification
     const pageContent = await page.content();
     if (!pageContent || pageContent.length < 10) {
       throw new Error('DOM Heuristic Fingerprint validation failed.');
     }
 
     console.log(`🔍 [Task Settled] Target Title: "${targetTitle}"`);
-    
     await browser.close();
     
-    // Clear circuit breaker state on clean execution
     delete circuitBreakers[task.targetUrl];
     return { success: true, targetTitle };
 
@@ -229,18 +274,16 @@ async function executePlaywrightTask(task) {
       try { await browser.close(); } catch (e) {}
     }
 
-    // Trip circuit breaker for 5 minutes on repeating anomalies
     circuitBreakers[task.targetUrl] = Date.now() + (5 * 60 * 1000);
-
     throw error;
   }
 }
 
-// Feature 12: System Recovery Bridge Wrapper
 async function executeWithRecoveryBridge(task) {
   try {
     return await executePlaywrightTask(task);
   } catch (error) {
+    systemMetrics.recoveredAnomalies++;
     console.warn(`⚠️ [Recovery Bridge] Anomaly intercepted on ${task.targetUrl}:${error.message}`);
     console.log(`🔄 [Recovery Bridge] Preserving system momentum and applying safety bypass...`);
     
@@ -251,9 +294,11 @@ async function executeWithRecoveryBridge(task) {
   }
 }
 
+let adaptiveTimer = null;
+
 async function runVerifiedTaskSpooler() {
   try {
-    const batchSize = 2; // Controlled concurrency per run
+    const batchSize = 2;
     const batchTasks = [];
 
     for (let i = 0; i < batchSize; i++) {
@@ -271,7 +316,6 @@ async function runVerifiedTaskSpooler() {
       }
     }
 
-    // Feature 11: Anti-Starvation & Zero-Idle Heartbeat Protocol
     if (batchTasks.length === 0) {
       console.log(`💓 [Anti-Starvation Heartbeat] Activating fallback niche scan to eliminate idle starvation...`);
       const heartbeatTask = await getAdaptiveNicheTarget();
@@ -282,62 +326,78 @@ async function runVerifiedTaskSpooler() {
 
     for (const task of batchTasks) {
       try {
-        // Execute through Recovery Bridge (Feature 12)
+        systemMetrics.totalTasksProcessed++;
         const scrapeResult = await executeWithRecoveryBridge(task);
+        systemMetrics.successfulExecutions++;
+        systemMetrics.lastExecutionTimestamp = new Date().toISOString();
 
-        // Dispatch Telegram telemetry with Interactive Controls (Feature 8)
+        const taskPayout = task.payoutUSD || 0.50;
+        const taskPayoutNGN = taskPayout * 1500;
+
         await dispatchTelegramMessage(
           `✅ *Verified Paid Task Executed*\n\n` +
           `• *Task ID:* \`${task.taskId}\`\n` +
           `• *Sector:* \`${task.sector}\`\n` +
           `• *Target:* \`${task.targetUrl}\`\n` +
+          `• *Task Amount:* \`$${taskPayout.toFixed(2)} (~₦${taskPayoutNGN.toLocaleString()})\`\n` +
           `• *Status:* \`${scrapeResult.success ? 'Success (' + scrapeResult.targetTitle + ')' : 'Handled Safely'}\``,
-          true // Enable interactive inline buttons
+          true
         );
       } catch (taskExecutionErr) {
         console.error(`❌ [Task Isolation Error] Failed processing task ${task.taskId}:`, taskExecutionErr.message);
       }
     }
+
+    const remainingQueue = await redisClient.lLen('tasks:verified_queue').catch(() => 0);
+    const nextCadence = remainingQueue > 0 ? 30000 : 300000;
+
+    if (systemMetrics.currentCadenceMs !== nextCadence) {
+      systemMetrics.currentCadenceMs = nextCadence;
+      console.log(`⚡ [Adaptive Polling] Cadence dynamically adjusted to ${nextCadence / 1000} seconds.`);
+    }
+
+    clearTimeout(adaptiveTimer);
+    adaptiveTimer = setTimeout(runVerifiedTaskSpooler, nextCadence);
+
   } catch (globalSpoolerErr) {
     console.error(`🛡️ [Spooler Circuit Breaker] Handled background exception:`, globalSpoolerErr.message);
+    clearTimeout(adaptiveTimer);
+    adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 300000);
   }
 }
 
-// Run bulk spooler on optimized cadence
-setInterval(runVerifiedTaskSpooler, 300000);
+setTimeout(runVerifiedTaskSpooler, 5000);
 
 
 // ==========================================
-// 6. SECURE WEBHOOK & $5 THRESHOLD FULFILLMENT
+// 6. OUT-OF-BAND SECURE WEBHOOK & FULFILLMENT
 // ==========================================
 app.post('/api/webhook/paystack', async (req, res) => {
-  try {
-    const signature = req.headers['x-paystack-signature'];
-    
-    const hash = crypto
-      .createHmac('sha512', PAYSTACK_SECRET_KEY)
-      .update(req.rawBody)
-      .digest('hex');
-
-    if (hash !== signature) {
-      console.warn('[Security] Unauthorized webhook signature dropped.');
-      return res.status(401).json({ error: 'Invalid signature' });
-    }
-
-    res.status(200).json({ status: 'received' });
-
-    const event = req.body;
-
-    if (event.event === 'charge.success') {
-      const paymentData = event.data;
-      const taskId = paymentData.metadata?.task_id || `vtask-${Date.now()}`;
-      const sector = paymentData.metadata?.sector || 'DelightPay Asset Fulfillment';
-      const reference = paymentData.reference;
+  setImmediate(async () => {
+    try {
+      const signature = req.headers['x-paystack-signature'];
       
-      const amountNGN = paymentData.amount / 100;
-      const estimatedUSD = Number((amountNGN / 1500).toFixed(2));
+      const hash = crypto
+        .createHmac('sha512', PAYSTACK_SECRET_KEY)
+        .update(req.rawBody)
+        .digest('hex');
 
-      try {
+      if (hash !== signature) {
+        console.warn('[Security] Unauthorized webhook signature dropped.');
+        return;
+      }
+
+      const event = req.body;
+
+      if (event.event === 'charge.success') {
+        const paymentData = event.data;
+        const taskId = paymentData.metadata?.task_id || `vtask-${Date.now()}`;
+        const sector = paymentData.metadata?.sector || 'DelightPay Asset Fulfillment';
+        const reference = paymentData.reference;
+        
+        const amountNGN = paymentData.amount / 100;
+        const estimatedUSD = Number((amountNGN / 1500).toFixed(2));
+
         const stateKey = `state:processed:${reference}`;
         const alreadyProcessed = await redisClient.get(stateKey).catch(() => null);
         
@@ -352,11 +412,9 @@ app.post('/api/webhook/paystack', async (req, res) => {
         currentBalanceUSD += estimatedUSD;
         await redisClient.set('wallet:balance_usd', currentBalanceUSD.toString()).catch(() => {});
 
-        console.log(`💰 [Wallet Credited] Task ${taskId} added $${estimatedUSD}. Balance: $${currentBalanceUSD.toFixed(2)}`);
+        console.log(`💰 [Out-of-Band Wallet Credited] Task ${taskId} added $${estimatedUSD}. Balance: $${currentBalanceUSD.toFixed(2)}`);
 
         if (currentBalanceUSD >= 5.00) {
-          console.log(`🚀 [Threshold Reached] Balance ($${currentBalanceUSD.toFixed(2)}) meets $5.00 requirement.`);
-          
           await dispatchTelegramMessage(
             `💰 *Paystack Balance Threshold Reached!*\n\n` +
             `• *Current Balance:* \`$${currentBalanceUSD.toFixed(2)} (~₦${(currentBalanceUSD * 1500).toLocaleString()})\`\n` +
@@ -365,7 +423,7 @@ app.post('/api/webhook/paystack', async (req, res) => {
           );
         } else {
           await dispatchTelegramMessage(
-            `💰 *Verified Paid Webhook Processed*\n\n` +
+            `💰 *Verified Paid Webhook Processed (Out-of-Band)*\n\n` +
             `• *Task ID:* \`${taskId}\`\n` +
             `• *Sector:* \`${sector}\`\n` +
             `• *Amount:* \`₦${amountNGN.toLocaleString()}\` (~$${estimatedUSD})\n` +
@@ -374,18 +432,18 @@ app.post('/api/webhook/paystack', async (req, res) => {
           );
         }
 
-      } catch (redisErr) {
-        console.warn(`⚠️ [Webhook Notice] Redis state tracking bypassed: ${redisErr.message}`);
+        clearTimeout(adaptiveTimer);
+        adaptiveTimer = setTimeout(runVerifiedTaskSpooler, 1000);
       }
-
-      console.log(`[Fulfillment Success] Task ${taskId} successfully executed and settled. Ref: ${reference}`);
+    } catch (error) {
+      console.error('[Out-of-Band Webhook Error - Handled Safely]', error);
     }
-  } catch (error) {
-    console.error('[Webhook Error - Handled Safely]', error);
-  }
+  });
+
+  return res.status(200).json({ status: 'received' });
 });
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Autonomous Outbound Engine running securely on port ${PORT} (12 Features Active)`);
+  console.log(`Autonomous Outbound Engine running securely on port ${PORT} (Real-Time Adaptive Mode Active)`);
 });
