@@ -121,7 +121,7 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
-    service: 'Autonomous Real-World Compliance Cluster',
+    service: 'Strictly Real-World Production Compliance Cluster',
     mode: redisDegraded ? 'In-Memory Fallback Active' : 'Standard Redis Connected',
     timestamp: new Date().toISOString()
   });
@@ -187,7 +187,7 @@ app.post('/api/tasks/submit-bundle', async (req, res) => {
     queuedCount++;
   }
 
-  res.status(200).json({ success: true, message: `Successfully queued ${queuedCount} tasks from bundle.` });
+  res.status(200).json({ success: true, message: `Successfully queued ${queuedCount} real tasks from bundle.` });
 });
 
 // ==========================================
@@ -295,13 +295,13 @@ async function executeTaskRouter(task, page) {
 }
 
 // ==========================================
-// ACTIVE REAL-WORLD PRODUCTION FEEDER
+// STRICTLY REAL PRODUCTION FEEDER
 // ==========================================
 async function runSelfDiscoveryFeeder() {
   try {
     let discoveredUrls = [];
 
-    // 1. Try pulling from Sitemap if configured
+    // 1. Pull exclusively from real Sitemap if configured
     if (TARGET_SITEMAP_URL) {
       try {
         const res = await fetch(TARGET_SITEMAP_URL);
@@ -310,22 +310,21 @@ async function runSelfDiscoveryFeeder() {
         if (matches && matches.length > 0) {
           discoveredUrls = matches.map(m => m.replace(/<\/?loc>/g, '')).slice(0, 10);
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error('❌ [Sitemap Fetch Error]', e.message);
+      }
     }
 
-    // 2. If no sitemap or empty, actively target real production deployment endpoints
+    // 2. Otherwise, strictly target the actual live base URL root
     if (discoveredUrls.length === 0 && PRODUCTION_BASE_URL) {
-      discoveredUrls = [
-        PRODUCTION_BASE_URL,
-        `${PRODUCTION_BASE_URL}/`
-      ];
+      discoveredUrls = [PRODUCTION_BASE_URL];
     }
 
     if (discoveredUrls.length > 0) {
       for (const url of discoveredUrls) {
         const task = {
-          batchId: `prod_sync_${Date.now()}`,
-          taskId: `live_${Math.random().toString(36).substring(7)}`,
+          batchId: `live_real_${Date.now()}`,
+          taskId: `real_${Math.random().toString(36).substring(7)}`,
           type: 'mixed_content',
           targetUrl: url,
           expectedMarker: null,
@@ -334,12 +333,13 @@ async function runSelfDiscoveryFeeder() {
         };
         await safeRedisPush('tasks:verified_queue', JSON.stringify(task));
       }
-      console.log(`🌐 [Feeder] Queued ${discoveredUrls.length} live production targets for active auditing.`);
+      console.log(`🌐 [Feeder] Dispatched ${discoveredUrls.length} strictly real production audit targets.`);
     }
   } catch (err) {
     console.error('❌ [Production Feeder Error]', err.message);
   }
 
+  // Check every 60 seconds
   setTimeout(runSelfDiscoveryFeeder, 60 * 1000);
 }
 
@@ -354,7 +354,7 @@ async function runAuditSpooler() {
     }
 
     const task = JSON.parse(rawTask);
-    console.log(`🔍 [Processing Production Task] ID: ${task.taskId} | Type: ${task.type} \vert{} URL:${task.targetUrl}`);
+    console.log(`🔍 [Processing Real Production Task] ID: ${task.taskId} | Type: ${task.type} \vert{} URL:${task.targetUrl}`);
     
     const browser = await getSharedBrowser();
     context = await browser.newContext({
@@ -366,16 +366,16 @@ async function runAuditSpooler() {
     await context.close();
 
     if (!auditResult.success) {
-      console.warn(`⚠️ [Production Compliance Failure] Task ${task.taskId} (${task.type}) failed verification.`);
+      console.warn(`⚠️ [Real-World Compliance Failure] Task ${task.taskId} (${task.type}) failed verification.`);
       await sendTelegramAlert(
-        `🚨 *Production Compliance Failure*\n\n` +
+        `🚨 *Real-World Compliance Failure*\n\n` +
         `• *Pillar:* \`${task.type}\`\n` +
         `• *Target:* \`${task.targetUrl}\`\n` +
         `• *Task ID:* \`${task.taskId}\`\n` +
         `• *Status:* \`Failed / Non-Compliant\``
       );
     } else {
-      console.log(`✅ [Audit Passed] Production task ${task.taskId} (${task.type}) verified successfully.`);
+      console.log(`✅ [Audit Passed] Real production task ${task.taskId} (${task.type}) verified successfully.`);
     }
 
   } catch (err) {
@@ -392,5 +392,5 @@ setTimeout(runAuditSpooler, 2000);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Real-World Production Compliance Cluster active on port ${PORT}`);
+  console.log(`Strictly Real-World Production Compliance Cluster active on port ${PORT}`);
 });
