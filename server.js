@@ -1,86 +1,65 @@
 const express = require('express');
 const crypto = require('crypto');
-const Redis = require('redis');
+const fs = require('fs');
+const path = require('path');
 const { chromium } = require('playwright');
 
 const app = express();
 
-// Sanitize REDIS_URL
-const rawRedisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-const sanitizedRedisUrl = rawRedisUrl.replace(/^[\s\u200e\u200f\u202a-\u202e]+/, '').trim();
-
-const redisClient = Redis.createClient({ 
-  url: sanitizedRedisUrl,
-  socket: {
-    tls: sanitizedRedisUrl.startsWith('rediss://'),
-    rejectUnauthorized: false
-  }
-});
-
-let redisDegraded = false;
-
-redisClient.on('error', (err) => {
-  if (err.message && (err.message.includes('max requests limit exceeded') || err.message.includes('OOM'))) {
-    redisDegraded = true;
-  }
-  console.error('[Redis Client Error]', err.message);
-});
-
-redisClient.connect().then(() => {
-  console.log('[Redis] Connected successfully to state store.');
-}).catch(err => {
-  redisDegraded = true;
-  console.error('[Redis Connection Warning - Operating in Memory Fallback Mode]', err.message);
-});
-
 // ==========================================
-// RESILIENT IN-MEMORY FALLBACK LAYER
+// LIGHTWEIGHT LOCAL JSON STORAGE LAYER
 // ==========================================
-const memoryQueue = [];
-const memoryState = new Map();
+const STORAGE_FILE = path.join(__dirname, 'cluster_state.json');
 
-async function safeRedisGet(key) {
-  if (redisDegraded) return memoryState.get(key) || null;
+let localData = {
+  queue: [],
+  state: {}
+};
+
+function loadLocalStore() {
   try {
-    return await redisClient.get(key);
+    if (fs.existsSync(STORAGE_FILE)) {
+      const raw = fs.readFileSync(STORAGE_FILE, 'utf8');
+      localData = JSON.parse(raw);
+      if (!Array.isArray(localData.queue)) localData.queue = [];
+      if (!localData.state || typeof localData.state !== 'object') localData.state = {};
+      console.log(`[Storage] Loaded local state store successfully (${localData.queue.length} tasks in queue).`);
+    }
   } catch (err) {
-    redisDegraded = true;
-    return memoryState.get(key) || null;
+    console.error('❌ [Storage Error] Failed to load local store:', err.message);
   }
 }
 
-async function safeRedisSet(key, val) {
-  memoryState.set(key, val);
-  if (redisDegraded) return;
+function saveLocalStore() {
   try {
-    await redisClient.set(key, val);
+    fs.writeFileSync(STORAGE_FILE, JSON.stringify(localData, null, 2), 'utf8');
   } catch (err) {
-    redisDegraded = true;
+    console.error('❌ [Storage Error] Failed to save local store:', err.message);
   }
 }
 
-async function safeRedisPush(queueName, payload) {
-  if (redisDegraded) {
-    memoryQueue.push(payload);
-    return memoryQueue.length;
-  }
-  try {
-    return await redisClient.rPush(queueName, payload);
-  } catch (err) {
-    redisDegraded = true;
-    memoryQueue.push(payload);
-    return memoryQueue.length;
-  }
+// Load store on boot
+loadLocalStore();
+
+async function storeGet(key) {
+  return localData.state[key] || null;
 }
 
-async function safeRedisPop(queueName) {
-  if (redisDegraded) return memoryQueue.shift() || null;
-  try {
-    return await redisClient.lPop(queueName);
-  } catch (err) {
-    redisDegraded = true;
-    return memoryQueue.shift() || null;
-  }
+async function storeSet(key, val) {
+  localData.state[key] = val;
+  saveLocalStore();
+}
+
+async function storePush(payload) {
+  localData.queue.push(payload);
+  saveLocalStore();
+  return localData.queue.length;
+}
+
+async function storePop() {
+  const item = localData.queue.shift() || null;
+  if (item) saveLocalStore();
+  return item;
 }
 
 // CONFIG & SECRETS
@@ -105,9 +84,7 @@ async function sendTelegramAlert(text) {
         parse_mode: 'Markdown'
       })
     });
-  } catch (err) {
-    console.error('❌ [Telegram Alert Error]', err.message);
-  }
+  } catch (err) {}
 }
 
 // RAW BODY CAPTURE FOR PAYSTACK HMAC
@@ -121,8 +98,9 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.status(200).json({
     status: 'online',
-    service: 'Strictly Real-World Production Compliance Cluster',
-    mode: redisDegraded ? 'In-Memory Fallback Active' : 'Standard Redis Connected',
+    service: 'Local-Persistence Real-World Compliance Cluster',
+    mode: 'Local JSON File Storage Active',
+    queueLength: localData.queue.length,
     timestamp: new Date().toISOString()
   });
 });
@@ -144,8 +122,8 @@ app.post('/api/webhook/paystack', async (req, res) => {
     const customerEmail = data.customer.email;
 
     console.log(`💰 [Escrow Funded] NGN ${amountPaidNGN} received from${customerEmail}`);
-    const currentBalance = parseFloat(await safeRedisGet('wallet:escrow_balance_ngn') || '0.00');
-    await safeRedisSet('wallet:escrow_balance_ngn', (currentBalance + amountPaidNGN).toString());
+    const currentBalance = parseFloat(await storeGet('wallet:escrow_balance_ngn') || '0.00');
+    await storeSet('wallet:escrow_balance_ngn', (currentBalance + amountPaidNGN).toString());
     
     await sendTelegramAlert(`💰 *Escrow Funded*\nReceived NGN ${amountPaidNGN} from \`${customerEmail}\``);
   }
@@ -183,7 +161,7 @@ app.post('/api/tasks/submit-bundle', async (req, res) => {
       timestamp: Date.now()
     });
 
-    await safeRedisPush('tasks:verified_queue', payload);
+    await storePush(payload);
     queuedCount++;
   }
 
@@ -301,7 +279,6 @@ async function runSelfDiscoveryFeeder() {
   try {
     let discoveredUrls = [];
 
-    // 1. Pull exclusively from real Sitemap if configured
     if (TARGET_SITEMAP_URL) {
       try {
         const res = await fetch(TARGET_SITEMAP_URL);
@@ -310,36 +287,35 @@ async function runSelfDiscoveryFeeder() {
         if (matches && matches.length > 0) {
           discoveredUrls = matches.map(m => m.replace(/<\/?loc>/g, '')).slice(0, 10);
         }
-      } catch (e) {
-        console.error('❌ [Sitemap Fetch Error]', e.message);
-      }
+      } catch (e) {}
     }
 
-    // 2. Otherwise, strictly target the actual live base URL root
     if (discoveredUrls.length === 0 && PRODUCTION_BASE_URL) {
       discoveredUrls = [PRODUCTION_BASE_URL];
     }
 
     if (discoveredUrls.length > 0) {
       for (const url of discoveredUrls) {
-        const task = {
-          batchId: `live_real_${Date.now()}`,
-          taskId: `real_${Math.random().toString(36).substring(7)}`,
-          type: 'mixed_content',
-          targetUrl: url,
-          expectedMarker: null,
-          selector: null,
-          timestamp: Date.now()
-        };
-        await safeRedisPush('tasks:verified_queue', JSON.stringify(task));
+        // Prevent spamming duplicate uncompleted tasks if queue already has items
+        if (localData.queue.length < 5) {
+          const task = {
+            batchId: `live_real_${Date.now()}`,
+            taskId: `real_${Math.random().toString(36).substring(7)}`,
+            type: 'mixed_content',
+            targetUrl: url,
+            expectedMarker: null,
+            selector: null,
+            timestamp: Date.now()
+          };
+          await storePush(JSON.stringify(task));
+        }
       }
-      console.log(`🌐 [Feeder] Dispatched ${discoveredUrls.length} strictly real production audit targets.`);
+      console.log(`🌐 [Feeder] Checked targets. Current queue size: ${localData.queue.length}`);
     }
   } catch (err) {
     console.error('❌ [Production Feeder Error]', err.message);
   }
 
-  // Check every 60 seconds
   setTimeout(runSelfDiscoveryFeeder, 60 * 1000);
 }
 
@@ -347,7 +323,7 @@ async function runSelfDiscoveryFeeder() {
 async function runAuditSpooler() {
   let context = null;
   try {
-    let rawTask = await safeRedisPop('tasks:verified_queue');
+    let rawTask = await storePop();
     if (!rawTask) {
       setTimeout(runAuditSpooler, 3000);
       return;
@@ -392,5 +368,5 @@ setTimeout(runAuditSpooler, 2000);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Strictly Real-World Production Compliance Cluster active on port ${PORT}`);
+  console.log(`Local-Persistence Compliance Cluster active on port ${PORT}`);
 });
