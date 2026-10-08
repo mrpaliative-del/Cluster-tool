@@ -86,10 +86,12 @@ app.use(express.json());
 
 // HEALTH & METRICS ENDPOINT
 app.get('/', (req, res) => {
-  status: 'online',
-  service: '4-Pillar Autonomous Technical Compliance Cluster',
-  mode: redisDegraded ? 'In-Memory Fallback Active' : 'Standard Redis Connected',
-  timestamp: new Date().toISOString()
+  res.status(200).json({
+    status: 'online',
+    service: '4-Pillar Autonomous Technical Compliance Cluster',
+    mode: redisDegraded ? 'In-Memory Fallback Active' : 'Standard Redis Connected',
+    timestamp: new Date().toISOString()
+  });
 });
 
 // PAYSTACK ESCROW FUNDING WEBHOOK
@@ -314,7 +316,6 @@ async function runAuditSpooler() {
     };
 
     console.log(`✅ [Audit Receipt Generated] Task ${receipt.taskId} (${receipt.type}) completed successfully.`);
-    // TODO: Forward receipt to downstream database or webhook aggregator
 
   } catch (err) {
     if (context) { try { await context.close(); } catch (e) {} }
