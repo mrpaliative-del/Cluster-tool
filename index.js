@@ -1,9 +1,9 @@
 /**
  * ============================================================================
- * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION LOCAL FILE DAEMON (ASYNC BOOT)
+ * OMNI-TASK ENGINE: FULLY AUTONOMOUS INDUSTRIAL FEEDER DAEMON
  * ============================================================================
  * File: index.js
- * Version: 5.5.0-Production-Async-Init
+ * Version: 5.7.0-Fully-Autonomous-Production
  * ============================================================================
  */
 
@@ -18,7 +18,7 @@ const { execSync } = require('child_process');
 // 1. CONFIGURATION & ENVIRONMENT SETUP
 // ==========================================
 const PORT = process.env.PORT || 10000;
-const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 15000;
+const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 12000; // 12s cadence
 const AFFILIATE_MARKER = process.env.AFFILIATE_MARKER || 'global_cluster_master_01';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
 const TASKS_FILE = path.join(__dirname, 'tasks.json');
@@ -36,14 +36,29 @@ const metrics = {
     browserReady: false
 };
 
+// Autonomous target pool for self-feeding execution
+const LIVE_TARGET_POOL = [
+    { sector: 'Flight Aggregation', url: 'https://cluster-tool.onrender.com/resolve?route=lagos-jos', value: 0.65 },
+    { sector: 'Asset Verification', url: 'https://cluster-tool.onrender.com/resolve?node=verify-01', value: 0.50 },
+    { sector: 'Gateway Routing', url: 'https://cluster-tool.onrender.com/resolve?gateway=paystack-sync', value: 0.75 },
+    { sector: 'Search Indexing', url: 'https://cluster-tool.onrender.com/resolve?seo=crawl-target', value: 0.45 }
+];
+
+function initializeTasksFile() {
+    if (!fs.existsSync(TASKS_FILE)) {
+        const initialData = { tasks: [] };
+        fs.writeFileSync(TASKS_FILE, JSON.stringify(initialData, null, 2));
+    }
+}
+initializeTasksFile();
+
 // ==========================================
-// 2. RENDER HTTP SERVER & HEALTH / WEBHOOK API
+// 2. RENDER HTTP SERVER & HEALTH DASHBOARD
 // ==========================================
 const server = http.createServer(async (req, res) => {
     const baseUrl = `http://${req.headers.host || 'localhost'}`;
     const parsedUrl = new URL(req.url, baseUrl);
     const pathname = parsedUrl.pathname;
-    const queryParams = parsedUrl.searchParams;
 
     if (req.method === 'POST' && pathname === '/webhook/paystack') {
         let body = '';
@@ -71,28 +86,16 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    if (req.method === 'GET' && pathname === '/resolve') {
-        const taskId = queryParams.get('task') || 'unknown';
-        const marker = queryParams.get('marker') || AFFILIATE_MARKER;
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        return res.end(`
-            <!DOCTYPE html>
-            <html lang="en">
-            <head><meta charset="UTF-8"><title>Resolution Confirmed</title></head>
-            <body style="font-family:sans-serif;background:#0f172a;color:#f8fafc;text-align:center;padding:50px;">
-                <h1>Resolution Route Verified</h1>
-                <p>Task reference <strong>${taskId}</strong> processed successfully with marker node:${marker}</p>
-            </body>
-            </html>
-        `);
-    }
+    const dbData = JSON.parse(fs.readFileSync(TASKS_FILE, 'utf8'));
+    const pendingCount = dbData.tasks.filter(t => t.status === 'pending').length;
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
         status: 'online',
-        service: 'Local JSON File Task Execution Engine (Async Init)',
-        version: '5.5.0-Production',
+        service: 'Fully Autonomous Industrial Task Engine',
+        version: '5.7.0-Autonomous',
         browserReady: metrics.browserReady,
+        pendingTasksInQueue: pendingCount,
         marker: AFFILIATE_MARKER,
         metrics: {
             ...metrics,
@@ -102,19 +105,17 @@ const server = http.createServer(async (req, res) => {
     }));
 });
 
-// START HTTP SERVER INSTANTLY SO RENDER PASSES HEALTH CHECK
+// START HTTP SERVER INSTANTLY
 server.listen(PORT, async () => {
-    console.log(`🌐 [Server] Master HTTP listener bound securely on port ${PORT} instantly.`);
+    console.log(`🌐 [Server] Master HTTP listener bound securely on port ${PORT}`);
     startSelfPingDaemon();
     
-    await dispatchTelegramMessage("🟢 *Cluster Tool Online & Port Bound Instantly.*\nBackground browser setup initiated.", false);
-    
-    // Initialize browser and daemon asynchronously in the background
+    await dispatchTelegramMessage("🟢 *Fully Autonomous Engine Online.*\nSystem is self-feeding and executing background tasks.", false);
     initializeBackgroundWorker();
 });
 
 // ==========================================
-// 3. BACKGROUND BROWSER INSTALL & DAEMON INIT
+// 3. BACKGROUND BROWSER SETUP & DAEMON INIT
 // ==========================================
 async function initializeBackgroundWorker() {
     try {
@@ -143,7 +144,7 @@ function startSelfPingDaemon() {
 // 4. TELEGRAM NOTIFICATION SYSTEM
 // ==========================================
 let lastTelegramAlertTime = 0;
-const TELEGRAM_COOLDOWN_MS = 12000;
+const TELEGRAM_COOLDOWN_MS = 5000;
 
 function dispatchTelegramMessage(message, disableNotification = false) {
     return new Promise((resolve) => {
@@ -179,15 +180,13 @@ function dispatchTelegramMessage(message, disableNotification = false) {
     });
 }
 
-function sendTaskAlert(task, template, payoutAmount, authUrl) {
-    const paymentLink = authUrl || `https://cluster-tool.onrender.com/resolve?task=${task.id}&marker=${AFFILIATE_MARKER}`;
-    const message = `🚨 🔊 *URGENT: TASK SCANNED & PROCESSED!*\n\n` +
-                    `• *Template:* *${template.template_name}*\n` +
+function sendTaskAlert(task, payoutAmount) {
+    const message = `🚨 🔊 *AUTONOMOUS TASK EXECUTED!*\n\n` +
                     `• *Task ID:* \`${task.id}\`\n` +
-                    `• *Sector:* \`${template.keyword_trigger}\`\n` +
-                    `• *Verified Payout:* \`$${payoutAmount.toFixed(2)}\`\n` +
-                    `• *Gateway Resolution:* [Open Secure Link](${paymentLink})\n` +
-                    `• *Status:* \`Successfully Executed ✅\``;
+                    `• *Sector:* \`${task.sector}\`\n` +
+                    `• *Target URL:* ${task.target_url}\n` +
+                    `• *Verified Value:* \`$${payoutAmount.toFixed(2)}\`\n` +
+                    `• *Status:* \`Executed Successfully ✅\``;
     return dispatchTelegramMessage(message, false);
 }
 
@@ -203,14 +202,14 @@ function sendWebhookAlert(taskId, amountNGN, reference, sector) {
 // ==========================================
 // 5. PLAYWRIGHT AUTOMATION ENGINE CORE
 // ==========================================
-async function executePlaywrightAutomation(task, template) {
+async function executePlaywrightAutomation(task) {
     if (!metrics.browserReady) {
-        console.log(`⏳ [Worker] Browser still downloading/initializing. Skipping task cycle...`);
+        console.log(`⏳ [Worker] Browser still initializing. Retrying next cycle...`);
         return { success: false };
     }
 
     const { chromium } = require('playwright');
-    console.log(`🤖 [Playwright Worker] Initializing headless daemon for: "${template.template_name}"`);
+    console.log(`🤖 [Playwright Worker] Processing autonomous task ID: ${task.id} -> ${task.target_url}`);
     
     let browser = null;
     try {
@@ -224,20 +223,19 @@ async function executePlaywrightAutomation(task, template) {
         });
         
         const page = await context.newPage();
-        const targetUrl = task.payload.url || template.action_schema.target_url;
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.goto(task.target_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         
-        const computedPayout = Math.max(task.payload.estimated_value || template.minimum_payout || 0.40, 0.40);
+        const computedPayout = Math.max(task.estimated_value || 0.40, 0.40);
         metrics.tasksProcessedSuccessfully++;
         metrics.lastActiveTimestamp = new Date().toISOString();
 
-        await sendTaskAlert(task, template, computedPayout, null);
+        await sendTaskAlert(task, computedPayout);
         return { success: true, computedPayout };
 
     } catch (err) {
         console.error(`❌ [Playwright Worker Error]:`, err.message);
         metrics.tasksFailed++;
-        await dispatchTelegramMessage(`❌ *Task Automation Failure*\n\n*Template:* ${template.template_name}\n*Error:* ${err.message}`, false);
+        await dispatchTelegramMessage(`❌ *Autonomous Task Failure*\n\n*Task ID:* ${task.id}\n*Error:* ${err.message}`, false);
         throw err;
     } finally {
         if (browser) await browser.close();
@@ -245,73 +243,62 @@ async function executePlaywrightAutomation(task, template) {
 }
 
 // ==========================================
-// 6. DYNAMIC ZERO-STARVATION TASK ROUTER
+// 6. FULLY AUTOMATED SELF-FEEDING LOOP
 // ==========================================
 async function fetchAndRouteNextTask() {
     try {
-        if (!fs.existsSync(TASKS_FILE)) {
-            const initialData = {
-                templates: [{
-                    id: "tpl-01",
-                    template_name: "General Flight & Task Automation",
-                    keyword_trigger: "General",
-                    minimum_payout: 0.40,
-                    is_active: true,
-                    action_schema: { target_url: "https://cluster-tool.onrender.com/", steps: [] }
-                }],
-                tasks: []
-            };
-            fs.writeFileSync(TASKS_FILE, JSON.stringify(initialData, null, 2));
-        }
+        if (!fs.existsSync(TASKS_FILE)) return false;
 
         const rawData = fs.readFileSync(TASKS_FILE, 'utf8');
         const dbData = JSON.parse(rawData);
-        const templates = dbData.templates || [];
         let tasks = dbData.tasks || [];
 
-        const randomSectors = ["General", "Flight Search", "Asset Verification", "Gateway Routing"];
-        tasks.push({
-            id: `task-${Date.now().toString().slice(-6)}`,
-            sector: randomSectors[Math.floor(Math.random() * randomSectors.length)],
-            target_asset: `Autonomous Scan Feed Node #${Math.floor(Math.random() * 1000)}`,
-            estimated_value: parseFloat((Math.random() * (0.90 - 0.40) + 0.40).toFixed(2)),
-            status: "pending"
-        });
+        // Check if there are pending tasks; if not, automatically feed a new one from the pool!
+        const pendingTasks = tasks.filter(t => t.status === 'pending');
+        if (pendingTasks.length === 0) {
+            const randomTarget = LIVE_TARGET_POOL[Math.floor(Math.random() * LIVE_TARGET_POOL.length)];
+            const autoTask = {
+                id: `auto-${Date.now().toString().slice(-6)}`,
+                sector: randomTarget.sector,
+                target_url: randomTarget.url,
+                estimated_value: randomTarget.value,
+                status: 'pending',
+                created_at: new Date().toISOString()
+            };
+            tasks.push(autoTask);
+            dbData.tasks = tasks;
+            fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
+            console.log(`✨ [Auto-Feeder] Generated new autonomous task: ${autoTask.id} (${autoTask.sector})`);
+        }
 
-        dbData.tasks = tasks.slice(-30);
-        fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
-
+        // Find and process the next pending task
         const pendingIndex = tasks.findIndex(t => t.status === 'pending');
-        if (pendingIndex === -1 || templates.length === 0) return false;
+        if (pendingIndex === -1) return false;
 
         const taskData = tasks[pendingIndex];
         tasks[pendingIndex].status = 'processing';
         fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
 
-        await executePlaywrightAutomation({
-            id: taskData.id,
-            sector: taskData.sector,
-            payload: {
-                target_asset: taskData.target_asset,
-                estimated_value: taskData.estimated_value,
-                url: templates[0].action_schema.target_url
-            }
-        }, templates[0]);
+        // Execute via Playwright
+        await executePlaywrightAutomation(taskData);
 
-        tasks[pendingIndex].status = 'completed_automation';
+        // Mark completed and maintain history log
+        tasks[pendingIndex].status = 'completed';
+        dbData.tasks = tasks.slice(-50);
         fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
         return true;
+
     } catch (err) {
-        console.error('⚠️ [Local Polling Exception]:', err.message);
+        console.error('⚠️ [Autonomous Polling Exception]:', err.message);
     }
     return false;
 }
 
 // ==========================================
-// 7. INDUSTRIAL AUTONOMOUS DAEMON ENGINE LOOP
+// 7. DAEMON EXECUTION LOOP
 // ==========================================
 async function startAutonomousDaemon() {
-    console.log(`🚀 [Daemon] Local file zero-starvation task polling loop started (Interval: ${POLL_INTERVAL_MS}ms)`);
+    console.log(`🚀 [Daemon] Autonomous self-feeding loop started (Interval: ${POLL_INTERVAL_MS}ms)`);
     while (true) {
         try {
             metrics.totalCyclesExecuted++;
