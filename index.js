@@ -3,7 +3,7 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION LOCAL FILE DAEMON
  * ============================================================================
  * File: index.js
- * Version: 5.2.5-Production-KeepAlive
+ * Version: 5.2.6-Production-KeepAlive-Sound
  * Architecture: Local JSON File Queue (`tasks.json`) + BullMQ + 
  * Playwright Headless Automation + Paystack Webhook Settlement & KeepAlive.
  * ============================================================================
@@ -140,7 +140,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Local JSON File Task Execution Engine (BullMQ Integrated)',
-        version: '5.2.5-Production-KeepAlive',
+        version: '5.2.6-Production-KeepAlive-Sound',
         marker: AFFILIATE_MARKER,
         metrics: {
             ...metrics,
@@ -150,9 +150,12 @@ const server = http.createServer(async (req, res) => {
     }));
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
     console.log(`🌐 [Server] Master HTTP listener bound securely on port ${PORT}`);
     startSelfPingDaemon();
+    
+    // Boot-up sound test to ensure Telegram notifications ring properly
+    await dispatchTelegramMessage("🟢 *Cluster Tool Online & Scanning Active.*\nYour engine is warm and listening for inbound tasks.", false);
 });
 
 // ==========================================
@@ -177,9 +180,9 @@ function startSelfPingDaemon() {
 }
 
 // ==========================================
-// 4. ADVANCED TIMEOUT-PROTECTED TELEGRAM SYSTEM
+// 4. ADVANCED HIGH-PRIORITY TELEGRAM SYSTEM
 // ==========================================
-function dispatchTelegramMessage(message) {
+function dispatchTelegramMessage(message, disableNotification = false) {
     return new Promise((resolve) => {
         if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
             console.warn('⚠️ [Telegram] Skipped: Bot token or chat ID missing.');
@@ -189,7 +192,8 @@ function dispatchTelegramMessage(message) {
         const postData = JSON.stringify({
             chat_id: TELEGRAM_CHAT_ID,
             text: message,
-            parse_mode: 'Markdown'
+            parse_mode: 'Markdown',
+            disable_notification: disableNotification // False ensures sound/vibration alerts
         });
 
         const options = {
@@ -209,7 +213,7 @@ function dispatchTelegramMessage(message) {
             res.on('data', chunk => responseBody += chunk);
             res.on('end', () => {
                 if (res.statusCode === 200) {
-                    console.log('📱 [Telegram] Alert dispatched successfully.');
+                    console.log('📱 [Telegram] High-priority alert dispatched successfully.');
                     resolve(true);
                 } else {
                     console.error(`❌ [Telegram API Error] Status ${res.statusCode}:${responseBody}`);
@@ -236,27 +240,27 @@ function dispatchTelegramMessage(message) {
 
 function sendTaskAlert(task, template, payoutAmount, authUrl) {
     const paymentLink = authUrl || `https://cluster-tool.onrender.com/resolve?task=${task.id}&marker=${AFFILIATE_MARKER}`;
-    const message = `🚀 *Zero-Starvation Task Execution Alert*\n\n` +
+    const message = `🚨 🔊 *URGENT: TASK SCANNED & PROCESSED!*\n\n` +
                     `• *Template:* *${template.template_name}*\n` +
                     `• *Task ID:* \`${task.id}\`\n` +
                     `• *Sector/Trigger:* \`${template.keyword_trigger}\`\n` +
                     `• *Target Asset:* \`${task.payload.target_asset || 'N/A'}\`\n` +
                     `• *Verified Payout:* \`$${payoutAmount.toFixed(2)}\`\n` +
                     `• *Gateway Resolution:* [Open Secure Link](${paymentLink})\n` +
-                    `• *Daemon Status:* \`Processed Locally ✅\``;
+                    `• *Status:* \`Successfully Executed & Sounding ✅\``;
 
-    return dispatchTelegramMessage(message);
+    return dispatchTelegramMessage(message, false);
 }
 
 function sendWebhookAlert(taskId, amountNGN, reference, sector) {
-    const message = `💰 *Paystack Settlement Verified!*\n\n` +
+    const message = `💰 🔊 *Paystack Settlement Verified!*\n\n` +
                     `• *Task ID:* \`${taskId}\`\n` +
                     `• *Sector:* \`${sector}\`\n` +
                     `• *Settled Amount:* \`₦${amountNGN.toLocaleString()}\`\n` +
                     `• *Reference:* \`${reference}\`\n` +
                     `• *Ledger State:* \`Fulfilled & Balanced 🟢\``;
 
-    return dispatchTelegramMessage(message);
+    return dispatchTelegramMessage(message, false);
 }
 
 // ==========================================
@@ -316,7 +320,7 @@ async function executePlaywrightAutomation(task, template) {
     } catch (err) {
         console.error(`❌ [Playwright Worker Error]:`, err.message);
         metrics.tasksFailed++;
-        await dispatchTelegramMessage(`❌ *Task Automation Failure*\n\n*Template:* ${template.template_name}\n*Error:* ${err.message}`);
+        await dispatchTelegramMessage(`❌ *Task Automation Failure*\n\n*Template:* ${template.template_name}\n*Error:* ${err.message}`, false);
         throw err;
 
     } finally {
