@@ -546,7 +546,7 @@ async function pollAndDiscoverExternalTasks() {
             tasks.push(newDiscoveredTask);
             dbData.tasks = tasks;
             fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
-            console.log(`✨ [Discovered & Ingested] ID: ${newDiscoveredTask.id} | Sector: ${newDisworkingTask.sector}`);
+            console.log(`✨ [Discovered & Ingested] ID: ${newDiscoveredTask.id} | Sector: ${newDiscoveredTask.sector}`);
         }
 
         const pendingIndex = tasks.findIndex(t => t.status === 'pending');
