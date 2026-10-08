@@ -3,9 +3,9 @@
  * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION LOCAL FILE DAEMON
  * ============================================================================
  * File: index.js
- * Version: 5.0.0-Local-Standalone
+ * Version: 5.2.0-Production-Unified-Local
  * Architecture: Local JSON File Queue (`tasks.json`) + BullMQ + 
- * Playwright Headless Automation + Telegram Alerts.
+ * Playwright Headless Automation + Paystack Webhook Settlement & Telegram Alerts.
  * ============================================================================
  */
 
@@ -130,7 +130,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
         status: 'online',
         service: 'Local JSON File Task Execution Engine (BullMQ Integrated)',
-        version: '5.0.0-Local-Standalone',
+        version: '5.2.0-Production-Unified-Local',
         marker: AFFILIATE_MARKER,
         metrics: {
             ...metrics,
