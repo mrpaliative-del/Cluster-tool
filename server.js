@@ -15,23 +15,21 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 const AFFILIATE_MARKER = process.env.TRAVELPAYOUTS_MARKER || 'default_marker';
 
 // ==========================================
-// UNIFIED MULTI-VERTICAL AFFILIATE ASSET MATRIX
+// RESILIENT MULTI-VERTICAL AFFILIATE ASSET MATRIX
 // ==========================================
 const AFFILIATE_ASSET_MATRIX = [
-  // --- Travel Verticals (Aviasales & Hotellook) ---
-  { vertical: 'flight', path: 'search/LOS0112ABV1', value: 85, region: 'Flight (Lagos - Abuja)' },
-  { vertical: 'flight', path: 'search/LOS2012LHR1', value: 350, region: 'Flight (Lagos - London)' },
-  { vertical: 'flight', path: 'search/LOS2212DXB1', value: 320, region: 'Flight (Lagos - Dubai)' },
-  { vertical: 'hotel', path: 'hotels/destination/Lagos_Nigeria', value: 180, region: 'Hotel Stay (Lagos Hub)' },
-  { vertical: 'hotel', path: 'hotels/destination/London_UK', value: 420, region: 'Hotel Stay (London Hub)' },
+  // --- Travel Corridors (Aviasales Engine) ---
+  { vertical: 'flight', domain: 'https://www.aviasales.com/', path: 'search/LOS0112ABV1', value: 85, region: 'Flight (Lagos - Abuja)' },
+  { vertical: 'flight', domain: 'https://www.aviasales.com/', path: 'search/LOS2012LHR1', value: 350, region: 'Flight (Lagos - London)' },
+  { vertical: 'flight', domain: 'https://www.aviasales.com/', path: 'search/LOS2212DXB1', value: 320, region: 'Flight (Lagos - Dubai)' },
+  { vertical: 'hotel', domain: 'https://www.aviasales.com/', path: 'search/LOS0112ABV1', value: 180, region: 'Hotel Corridor (Lagos Hub)' },
 
   // --- E-Commerce & Tech Hardware (Amazon) ---
-  { vertical: 'retail', path: 's?k=developer+laptop+stand', value: 45, region: 'Tech Hardware (Amazon Hub)' },
-  { vertical: 'retail', path: 's?k=portable+monitor+usb+c', value: 95, region: 'Tech Gear (Retail Hub)' },
+  { vertical: 'retail', domain: 'https://www.amazon.com/', path: 's?k=developer+laptop+stand', value: 45, region: 'Tech Hardware (Amazon Hub)' },
+  { vertical: 'retail', domain: 'https://www.amazon.com/', path: 's?k=portable+monitor+usb+c', value: 95, region: 'Tech Gear (Retail Hub)' },
 
   // --- Cloud Hosting & Developer Tools (SaaS) ---
-  { vertical: 'saas', domain: 'https://www.digitalocean.com/?ref=', path: AFFILIATE_MARKER, value: 50, region: 'Cloud Infrastructure (DigitalOcean)' },
-  { vertical: 'saas', domain: 'https://www.siteground.com/gohome?a_id=', path: AFFILIATE_MARKER, value: 100, region: 'Managed Cloud Hosting' }
+  { vertical: 'saas', domain: 'https://www.digitalocean.com/?ref=', path: AFFILIATE_MARKER, value: 50, region: 'Cloud Infrastructure (DigitalOcean)' }
 ];
 
 // ==========================================
@@ -184,12 +182,10 @@ async function runAutonomousDiscovery() {
     const asset = AFFILIATE_ASSET_MATRIX[Math.floor(Math.random() * AFFILIATE_ASSET_MATRIX.length)];
     
     let fallbackUrl = '';
-    if (asset.vertical === 'flight') {
-      fallbackUrl = `https://www.aviasales.com/${asset.path}?marker=${AFFILIATE_MARKER}`;
-    } else if (asset.vertical === 'hotel') {
-      fallbackUrl = `https://www.hotellook.com/${asset.path}?marker=${AFFILIATE_MARKER}`;
+    if (asset.vertical === 'flight' || asset.vertical === 'hotel') {
+      fallbackUrl = `${asset.domain}${asset.path}?marker=${AFFILIATE_MARKER}`;
     } else if (asset.vertical === 'retail') {
-      fallbackUrl = `https://www.amazon.com/${asset.path}&tag=${AFFILIATE_MARKER}`;
+      fallbackUrl = `${asset.domain}${asset.path}&tag=${AFFILIATE_MARKER}`;
     } else if (asset.vertical === 'saas') {
       fallbackUrl = `${asset.domain}${asset.path}`;
     }
