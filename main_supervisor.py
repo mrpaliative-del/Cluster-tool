@@ -9,10 +9,10 @@ import time
 from fastapi import FastAPI, Request, Response, status
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 
-# Deep clean the credentials token input string directly using secure array parameters
+# Clean and sanitize environment configuration handles explicitly
 RAW_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN").strip()
 
-# Safeguard against logs or dynamic timestamp text appending onto the environment variable string
+# Safeguard against string mutation errors
 if "2026-" in RAW_TOKEN:
     TOKEN = RAW_TOKEN.split("2026-")[0].strip()
 else:
@@ -29,10 +29,16 @@ app = FastAPI()
 def health_check():
     return {"status": "online", "mode": "production_webhook_mesh", "timestamp": time.time()}
 
-# --- 1. Fixed Telegram Webhook Ingestion Intake Endpoint ---
-@app.post("/tg-backend-intake")
+# --- 1. Fixed Telegram Webhook Ingestion Intake Endpoint (Accepts both GET and POST) ---
+@app.api_route("/tg-backend-intake", methods=["GET", "POST"])
 async def telegram_webhook_router(request: Request):
-    """ Fixed static route removes dynamic string mutation issues permanently """
+    """ 
+    CRITICAL FIX: Employs dual-method pattern resolution. 
+    Accepts GET calls from pings and POST calls from chat triggers safely.
+    """
+    if request.method == "GET":
+        return {"status": "active", "info": "Webhook endpoint online"}
+        
     try:
         json_data = await request.json()
         update = Update.de_json(json_data)
@@ -98,7 +104,7 @@ def callback_inline(call):
             )
         elif call.data == "add_funds":
             print(f"💳 [UI] Compiling dynamic Paystack token gateway link for user ID: {call.from_user.id}")
-            pay_url = f"https://paystack.com{{\"telegram_id\":{call.from_user.id}}}"
+            pay_url = f"https://paystack.com{{\\\"telegram_id\\\":{call.from_user.id}}}"
             bot.send_message(
                 chat_id=call.message.chat.id,
                 text=f"💳 Click below to securely deposit funds via Paystack:\n[Secure Gateway Link]({pay_url})",
