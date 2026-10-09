@@ -67,11 +67,30 @@ def callback_inline(call):
 
 # --- 3. Isolated Background Execution Threads ---
 def run_telegram_polling():
-    print("💬 [THREAD] Telegram Interface Polling Engine is initiating...")
+    print("💬 [THREAD] Cleaning stale connection hooks and initiating Telegram Polling...")
+    
+    # CRITICAL FIX: Forces Telegram's servers to break any old ghost connections instantly
     try:
-        bot.infinity_polling(timeout=10, long_polling_timeout=5)
+        bot.delete_webhook(drop_pending_updates=True)
+        time.sleep(1) # Small 1-second pause to let the server connection reset cleanly
     except Exception as e:
-        print(f"❌ Telegram polling encountered an unhandled crash loop: {e}")
+        print(f"⚠️ Warning during initial connection flush: {e}")
+
+    while True:
+        try:
+            print("💬 [THREAD] Telegram Interface Polling Engine is running live.")
+            bot.infinity_polling(timeout=20, long_polling_timeout=10)
+        except telebot.apihelper.ApiTelegramException as e:
+            if e.error_code == 409:
+                print("⚠️ [409 Conflict] Detected another active bot container process.")
+                print("⏳ Backing off for 10 seconds to let the old Render instance finish termination...")
+                time.sleep(10) # Safe backoff buffer allowing old instances to shut down cleanly
+            else:
+                print(f"❌ Telegram API error encountered: {e}")
+                time.sleep(5)
+        except Exception as e:
+            print(f"❌ Telegram polling encountered an unhandled exception: {e}")
+            time.sleep(5)
 
 def run_java_execution_engine():
     print("☕ [THREAD] Launching High-Speed Java Execution Block off-heap...")
