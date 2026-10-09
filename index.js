@@ -464,3 +464,18 @@ ${(wallet.signals || []).slice(0, 10).map(s => `
         ${s.target_url ? `<a href="${s.target_url}" target="_blank" style="color: #38bdf8; font-size: 11px; text-decoration: none; background: #0369a133; padding: 3px 8px; border-radius: 4px; border: 1px solid #0369a1;">Launch Live Affiliate Stream &rarr;</a>` : ''}
     </div>
 `).join('')}
+                    <div class="card" style="margin-bottom: 15px;">
+                        <h3>Live Network Signals & Market Data</h3>
+                        <div class="list">
+                            ${(!wallet.signals || wallet.signals.length === 0) ? '<p style="color: #64748b;">No live network queries executed yet. Click "Query Live API Feeds" above.</p>' : ''}
+                            ${(wallet.signals || []).slice(0, 10).map(s => `
+                                <div class="item" style="flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px 0;">
+                                    <div style="display: flex; justify-content: space-between; width: 100%;">
+                                        <span><strong>[${s.sector}]</strong> ${s.route || s.metric} - <em>${s.status}</em></span>
+                                        <span class="val">Est: $${s.estimated_value_usd.toFixed(2)}</span>
+                                    </div>
+                                    ${s.target_url ? `<a href="${s.target_url}" target="_blank" style="color: #38bdf8; font-size: 11px; text-decoration: none; background: #0369a133; padding: 4px 10px; border-radius: 4px; border: 1px solid #0369a1; display: inline-block;">Launch Live Affiliate Stream &rarr;</a>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
