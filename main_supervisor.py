@@ -9,20 +9,12 @@ import time
 from fastapi import FastAPI, Request, Response, status
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 
-# Deep clean the environment variables token natively
-RAW_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN").strip()
-
-# Safeguard against logs or dynamic timestamp text appending onto the string variables pool safely
-if "2026-" in RAW_TOKEN:
-    # Safely isolate the raw token components using clean sequence parsing splits
-    TOKEN = RAW_TOKEN.split("2026-")[0].strip()
-else:
-    TOKEN = RAW_TOKEN
-
+# Read the environment variables exactly as strings
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").strip().rstrip('/')
 
-# Initialize Telebot instance using isolated native single-thread parameters
+# Initialize Telebot with raw string token without threaded handlers
 bot = telebot.TeleBot(TOKEN, threaded=False)
 app = FastAPI()
 
@@ -30,10 +22,10 @@ app = FastAPI()
 def health_check():
     return {"status": "online", "mode": "production_webhook_mesh", "timestamp": time.time()}
 
-# --- 1. Fixed Telegram Webhook Intake Engine (Supports Multi-Method Validation) ---
+# --- 1. Telegram Webhook Intrack Receiver Endpoint ---
 @app.api_route("/tg-backend-intake", methods=["GET", "POST"])
 async def telegram_webhook_router(request: Request):
-    """ Processes loopback health checks via GET and button inputs via POST """
+    """ Fixed static route removes dynamic string mutation issues completely """
     if request.method == "GET":
         return {"status": "active", "info": "Webhook endpoint online"}
         
@@ -67,7 +59,7 @@ async def paystack_webhook(request: Request):
             try:
                 bot.send_message(tg_id, f"✅ *Payment Confirmed!*\nSuccessfully deposited ₦{amount:,.2f} via Paystack into your trading ledger.", parse_mode="Markdown")
             except Exception as e:
-                print(f"⚠️ Paystack Telegram notification error: {e}")
+                print(f"⚠️ Paystack Telegram push connection alert dropped: {e}")
             
     return {"status": "success"}
 
@@ -88,12 +80,12 @@ def send_welcome(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
-    """ Main interface parameter logic for processing button interface callback events """
+    """ Handles interface actions passed down via the FastAPI intake endpoint link """
     try:
-        # Acknowledge the callback immediately to stop the button loading spinner animation
+        # Resolve the loading spinner on the button instantly
         bot.answer_callback_query(callback_query_id=call.id)
         
-        # Safely capture the current conversational workspace session
+        # Safely capture the exact conversational chat identity window object safely
         target_chat_id = call.message.chat.id
         
         if call.data == "get_yields":
@@ -113,7 +105,7 @@ def callback_inline(call):
                 disable_web_page_preview=True
             )
     except Exception as e:
-        print(f"❌ Error inside callback query handler context: {e}")
+        print(f"❌ Error during callback execution processing: {e}")
 
 # --- 4. Subprocess Lifecycles ---
 def run_java_execution_engine():
@@ -127,8 +119,8 @@ def run_keep_alive_loops():
     asyncio.run(keep_alive.start_parallel_loops())
 
 def setup_webhook_routing():
-    """ Registers the static connection routing parameters explicitly with Telegram's data node servers """
-    time.sleep(8)  # Let the FastAPI web gateway framework load up completely first
+    """ Registers the connection routing parameter explicitly with Telegram's data node servers """
+    time.sleep(12)  # Expanded buffer to let Uvicorn and Render fully swap containers first
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
     
     attempts = 0
@@ -158,6 +150,6 @@ if __name__ == "__main__":
     threading.Thread(target=run_keep_alive_loops, daemon=True).start()
     threading.Thread(target=setup_webhook_routing, daemon=True).start()
 
-    # Launch FastAPI core web server portal framework
+    # Launch FastAPI portal server framework
     port = int(os.getenv("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
