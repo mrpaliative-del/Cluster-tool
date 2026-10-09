@@ -1,9 +1,9 @@
 /**
  * ============================================================================
- * OMNI-TASK ENGINE: INDUSTRIAL ZERO-STARVATION CASCADING ECOSYSTEM
+ * OMNI-TASK ENGINE: INDUSTRIAL PRODUCTION REVENUE GATEWAY
  * ============================================================================
  * File: index.js
- * Version: 9.1.0-Outbound-Secure-Patch
+ * Version: 9.1.0-Production-Live
  * ============================================================================
  */
 
@@ -12,31 +12,24 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 // ==========================================
 // 1. CONFIGURATION & ENVIRONMENT SETUP
 // ==========================================
 const PORT = process.env.PORT || 10000;
-const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 15000;
-const AFFILIATE_MARKER = process.env.AFFILIATE_MARKER || 'global_cluster_master_01';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
 const OPAY_RECIPIENT_CODE = process.env.OPAY_RECIPIENT_CODE || ''; 
 const TASKS_FILE = path.join(__dirname, 'tasks.json');
 const WALLET_FILE = path.join(__dirname, 'wallet.json');
-const WITHDRAWAL_THRESHOLD_USD = 5.00;
 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A';
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '5058299552';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 
 const metrics = {
     uptimeStarted: Date.now(),
-    totalCyclesExecuted: 0,
-    tasksProcessedSuccessfully: 0,
-    tasksFailed: 0,
-    lastActiveTimestamp: null,
-    activeWorkerMarker: AFFILIATE_MARKER,
-    browserReady: false
+    totalWebhooksProcessed: 0,
+    realRevenueCapturedUSD: 0,
+    lastActiveTimestamp: null
 };
 
 function initializeStorageFiles() {
@@ -145,13 +138,13 @@ const server = http.createServer(async (req, res) => {
         req.on('end', async () => {
             try {
                 const payload = JSON.parse(body);
-                const email = payload.email || 'solveease.leads@gmail.com';
+                const email = payload.email || 'customer@domain.com';
                 const amountNGN = parseFloat(payload.amount) || 5000;
                 const amountInKobo = Math.round(amountNGN * 100);
                 
                 const response = await initializePaystackTransactionApi(email, amountInKobo, {
                     task_id: payload.task_id || `task-${Date.now().toString().slice(-6)}`,
-                    sector: payload.sector || 'DelightPay Direct API Fulfillment'
+                    sector: payload.sector || 'Direct API Checkout Fulfillment'
                 });
 
                 if (response.status) {
@@ -188,7 +181,6 @@ const server = http.createServer(async (req, res) => {
                     return res.end(JSON.stringify({ status: 'error', message: 'Invalid signature' }));
                 }
                 
-                // Acknowledge receipt immediately to comply with gateway timeout rules
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ status: 'received' }));
 
@@ -199,8 +191,14 @@ const server = http.createServer(async (req, res) => {
                     if (data.status !== 'success') return;
 
                     const metadata = data.metadata || {};
-                    console.log(`✅ [Webhook Success] Verified successful charge! Ref: ${data.reference}, Amount: ₦${data.amount / 100}`);
-                    await sendWebhookAlert(metadata.task_id || 'unknown', data.amount / 100, data.reference, metadata.sector || 'DelightPay Fulfillment');
+                    const amountNgn = data.amount / 100;
+                    const usdValue = Number((amountNgn / 1500).toFixed(2));
+
+                    console.log(`✅ [Paystack Verified] Charge received! Ref: ${data.reference}, Amount: ₦${amountNgn}`);
+                    
+                    // Credit wallet with real revenue
+                    await creditWalletWithRealPayment(metadata.task_id || data.reference, amountNgn, usdValue, metadata.sector || 'Paystack Checkout');
+                    await sendWebhookAlert(metadata.task_id || 'unknown', amountNgn, data.reference, metadata.sector || 'Paystack Checkout');
                 }
             } catch (err) {
                 console.error('⚠️ [Webhook Error]:', err.message);
@@ -209,20 +207,15 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    const dbData = JSON.parse(fs.readFileSync(TASKS_FILE, 'utf8'));
     const walletData = JSON.parse(fs.readFileSync(WALLET_FILE, 'utf8'));
-    const pendingCount = dbData.tasks.filter(t => t.status === 'pending').length;
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
         status: 'online',
-        service: 'Industrial Cascading Ecosystem Engine',
-        version: '9.1.0-Outbound-Secure-Patch',
-        browserReady: metrics.browserReady,
-        pendingTasksInQueue: pendingCount,
+        service: 'Production Revenue & Webhook Gateway',
+        version: '9.1.0-Production-Live',
         walletBalanceUSD: walletData.accumulated_usd,
         opayRecipientConfigured: Boolean(OPAY_RECIPIENT_CODE),
-        marker: AFFILIATE_MARKER,
         metrics: {
             ...metrics,
             uptime_seconds: Math.floor((Date.now() - metrics.uptimeStarted) / 1000)
@@ -233,29 +226,14 @@ const server = http.createServer(async (req, res) => {
 
 // START HTTP SERVER INSTANTLY
 server.listen(PORT, async () => {
-    console.log(`🌐 [Server] Master HTTP listener bound securely on port ${PORT}`);
+    console.log(`🌐 [Server] Production HTTP listener bound securely on port ${PORT}`);
     startSelfPingDaemon();
-    
-    await dispatchTelegramMessage("🟢 *Industrial Ecosystem Engine Online (v9.1.0).* Outbound Polling & Security Patch Active.", false);
-    initializeBackgroundWorker();
+    await dispatchTelegramMessage("🟢 *Production Revenue Gateway Online.* Simulations removed. Listening for live Paystack webhooks.", false);
 });
 
 // ==========================================
-// 4. BACKGROUND BROWSER SETUP & DAEMON INIT
+// 4. SELF-PING DAEMON
 // ==========================================
-async function initializeBackgroundWorker() {
-    try {
-        console.log(`🔍 [Playwright Check] Verifying browser binaries in background...`);
-        execSync('npx playwright install chromium', { stdio: 'inherit' });
-        metrics.browserReady = true;
-        console.log(`✅ [Playwright Check] Browser binaries verified and ready.`);
-    } catch (err) {
-        console.error(`⚠️ [Playwright Background Install Warning]:`, err.message);
-    }
-
-    startAutonomousDaemon();
-}
-
 function startSelfPingDaemon() {
     const PING_INTERVAL_MS = 10 * 60 * 1000;
     setInterval(() => {
@@ -269,15 +247,9 @@ function startSelfPingDaemon() {
 // ==========================================
 // 5. TELEGRAM NOTIFICATION SYSTEM
 // ==========================================
-let lastTelegramAlertTime = 0;
-const TELEGRAM_COOLDOWN_MS = 5000;
-
 function dispatchTelegramMessage(message, disableNotification = false) {
     return new Promise((resolve) => {
         if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return resolve(false);
-        const now = Date.now();
-        if (!disableNotification && (now - lastTelegramAlertTime < TELEGRAM_COOLDOWN_MS)) return resolve(false);
-        lastTelegramAlertTime = now;
 
         const postData = JSON.stringify({
             chat_id: TELEGRAM_CHAT_ID,
@@ -306,27 +278,8 @@ function dispatchTelegramMessage(message, disableNotification = false) {
     });
 }
 
-function sendTaskAlert(task, payoutAmount, currentBalance) {
-    const message = `🚨 🔊 *ECOSYSTEM TASK EXECUTED & CREDITED!*\n\n` +
-                    `• *Task ID:* \`${task.id}\`\n` +
-                    `• *Sector:* \`${task.sector}\`\n` +
-                    `• *Target URL:* ${task.target_url}\n` +
-                    `• *Task Value:* \`$${payoutAmount.toFixed(2)}\`\n` +
-                    `• *Accumulated Balance:* \`$${currentBalance.toFixed(2)} / $5.00\`\n` +
-                    `• *Status:* \`Verified & Credited ✅\``;
-    return dispatchTelegramMessage(message, false);
-}
-
-function sendRetentionAlert(amountUsd, ngnValue) {
-    const message = `💰 🔊 *THRESHOLD REACHED & RETAINED IN PAYSTACK!* \n\n` +
-                    `• *Amount:* \`$${amountUsd.toFixed(2)} USD\` (\`₦${ngnValue.toLocaleString()} NGN\`)\n` +
-                    `• *Destination:* \`Paystack Dashboard Balance\`\n` +
-                    `• *Status:* \`Held securely pending business compliance upgrade 🛡️\``;
-    return dispatchTelegramMessage(message, false);
-}
-
 function sendWebhookAlert(taskId, amountNGN, reference, sector) {
-    const message = `💰 🔊 *Paystack Gateway Webhook Verified (Success)*\n\n` +
+    const message = `💰 🔊 *REAL PAYSTACK PAYMENT RECEIVED*\n\n` +
                     `• *Task ID:* \`${taskId}\`\n` +
                     `• *Sector:* \`${sector}\`\n` +
                     `• *Settled Amount:* \`₦${amountNGN.toLocaleString()}\`\n` +
@@ -335,163 +288,19 @@ function sendWebhookAlert(taskId, amountNGN, reference, sector) {
 }
 
 // ==========================================
-// 6. DASHBOARD BALANCE ACCUMULATION
+// 6. REAL WALLET ACCUMULATION
 // ==========================================
-function handleDashboardBalanceAccumulation(amountUsd) {
-    return new Promise(async (resolve) => {
-        const ngnValue = Math.round(amountUsd * 1500);
-        console.log(`💰 [Dashboard Retention] ₦${ngnValue.toLocaleString()} retained safely in Paystack balance (Awaiting CAC/Business upgrade).`);
-        await sendRetentionAlert(amountUsd, ngnValue);
-        resolve(true);
-    });
-}
-
-// ==========================================
-// 7. WALLET & WITHDRAWAL THRESHOLD LOGIC
-// ==========================================
-async function creditWalletAndCheckThreshold(task, earnedAmount) {
+async function creditWalletWithRealPayment(taskId, amountNgn, amountUsd, sector) {
     let wallet = { accumulated_usd: 0.0, total_withdrawn_usd: 0.0, payouts_count: 0 };
     if (fs.existsSync(WALLET_FILE)) {
         wallet = JSON.parse(fs.readFileSync(WALLET_FILE, 'utf8'));
     }
 
-    wallet.accumulated_usd += earnedAmount;
-    const currentBalance = wallet.accumulated_usd;
-
-    console.log(`💰 [Wallet Credited] Task ${task.id} added $${earnedAmount.toFixed(2)}. Balance: $${currentBalance.toFixed(2)}`);
-
-    if (currentBalance >= WITHDRAWAL_THRESHOLD_USD) {
-        const balanceToWithdraw = currentBalance;
-        const retentionSuccess = await handleDashboardBalanceAccumulation(balanceToWithdraw);
-
-        if (retentionSuccess) {
-            wallet.total_withdrawn_usd += balanceToWithdraw;
-            wallet.accumulated_usd = 0.0;
-            wallet.payouts_count += 1;
-        }
-    }
+    wallet.accumulated_usd += amountUsd;
+    metrics.totalWebhooksProcessed++;
+    metrics.realRevenueCapturedUSD += amountUsd;
+    metrics.lastActiveTimestamp = new Date().toISOString();
 
     fs.writeFileSync(WALLET_FILE, JSON.stringify(wallet, null, 2));
-    return wallet.accumulated_usd;
-}
-
-// ==========================================
-// 8. PLAYWRIGHT AUTOMATION ENGINE CORE
-// ==========================================
-async function executePlaywrightAutomation(task) {
-    if (!task || !task.target_url || typeof task.target_url !== 'string') {
-        return { success: false };
-    }
-
-    if (!metrics.browserReady) {
-        return { success: false };
-    }
-
-    const { chromium } = require('playwright');
-    let browser = null;
-    try {
-        browser = await chromium.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-        });
-
-        const context = await browser.newContext({
-            userAgent: 'Mozilla/5.0 (Linux; Android 14; TECNO LI6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-            viewport: { width: 360, height: 800 },
-            locale: 'en-US',
-            timezoneId: 'Africa/Lagos'
-        });
-        
-        const page = await context.newPage();
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        await page.goto(task.target_url, { waitUntil: 'domcontentloaded', timeout: 35000 });
-        
-        metrics.tasksProcessedSuccessfully++;
-        metrics.lastActiveTimestamp = new Date().toISOString();
-
-        const computedPayout = Math.max(task.estimated_value || 1.25, 0.50);
-        const updatedBalance = await creditWalletAndCheckThreshold(task, computedPayout);
-
-        await sendTaskAlert(task, computedPayout, updatedBalance);
-        return { success: true, computedPayout };
-
-    } catch (err) {
-        metrics.tasksFailed++;
-        throw err;
-    } finally {
-        if (browser) await browser.close();
-    }
-}
-
-// ==========================================
-// 9. CASCADING MULTI-TIER ECOSYSTEM DISCOVERY
-// ==========================================
-async function pollAndDiscoverExternalTasks() {
-    try {
-        if (!fs.existsSync(TASKS_FILE)) return;
-
-        const rawData = fs.readFileSync(TASKS_FILE, 'utf8');
-        const dbData = JSON.parse(rawData);
-        let tasks = dbData.tasks || [];
-
-        const pendingTasks = tasks.filter(t => t.status === 'pending');
-        if (pendingTasks.length === 0) {
-            let selectedTarget = null;
-
-            const tier1NichePool = [
-                { sector: 'Payment Processing & Asset Fulfillment (DelightPay)', url: 'https://paystack.com/', value: 1.50 },
-                { sector: 'Gateway Synchronization & Webhook Verification', url: 'https://dashboard.paystack.com/', value: 1.25 },
-                { sector: 'Travel Aggregation & Deep-Link Routing (Lagos/Jos)', url: 'https://www.skyscanner.com/', value: 1.35 },
-                { sector: 'Search Engine & Answer Engine Optimization (SEO/AEO)', url: 'https://www.google.com/search?q=seo+optimization+services', value: 1.10 },
-                { sector: 'Automated Sports Analytics & Webhook Dispatch', url: 'https://rapidapi.com/', value: 1.00 }
-            ];
-
-            selectedTarget = tier1NichePool[Math.floor(Math.random() * tier1NichePool.length)];
-
-            const newDiscoveredTask = {
-                id: `task-${Date.now().toString().slice(-6)}`,
-                sector: selectedTarget.sector,
-                target_url: selectedTarget.url,
-                estimated_value: selectedTarget.value,
-                status: 'pending',
-                created_at: new Date().toISOString()
-            };
-
-            tasks.push(newDiscoveredTask);
-            dbData.tasks = tasks;
-            fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
-        }
-
-        const pendingIndex = tasks.findIndex(t => t.status === 'pending');
-        if (pendingIndex === -1) return;
-
-        const taskData = tasks[pendingIndex];
-        tasks[pendingIndex].status = 'processing';
-        fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
-
-        await executePlaywrightAutomation(taskData);
-
-        tasks[pendingIndex].status = 'completed';
-        dbData.tasks = tasks.slice(-50);
-        fs.writeFileSync(TASKS_FILE, JSON.stringify(dbData, null, 2));
-
-    } catch (err) {
-        console.error('⚠️ [Cascading Discovery Exception]:', err.message);
-    }
-}
-
-// ==========================================
-// 10. INDUSTRIAL DAEMON EXECUTION LOOP
-// ==========================================
-async function startAutonomousDaemon() {
-    console.log(`🚀 [Daemon] Zero-starvation compliant ecosystem loop active (Interval: ${POLL_INTERVAL_MS}ms)`);
-    while (true) {
-        try {
-            metrics.totalCyclesExecuted++;
-            await pollAndDiscoverExternalTasks();
-        } catch (daemonErr) {
-            console.error(`⚠️ [Daemon Loop Exception]:`, daemonErr.message);
-        }
-        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
-    }
+    console.log(`💰 [Real Revenue Credited] Added $${amountUsd.toFixed(2)} (₦${amountNgn.toLocaleString()}) from [${sector}]. Total Balance: $${wallet.accumulated_usd.toFixed(2)}`);
 }
