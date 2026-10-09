@@ -11,7 +11,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 
 # Clean and sanitize environment configuration handles explicitly
 RAW_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN")
-# Safely clean out any trailing system runtime characters or appended log text
+# Safely isolate the token if logs or timestamps were appended
 TOKEN = RAW_TOKEN.split("2026-")[0].strip()
 
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
@@ -94,7 +94,7 @@ def callback_inline(call):
             )
         elif call.data == "add_funds":
             print(f"💳 [UI] Compiling dynamic Paystack link for user ID: {call.from_user.id}")
-            pay_url = f"https://paystack.com{{\"telegram_id\":{call.from_user.id}}}"
+            pay_url = f"https://paystack.com{{\\\"telegram_id\\\":{call.from_user.id}}}"
             bot.send_message(
                 chat_id=call.message.chat.id,
                 text=f"💳 Click below to securely deposit funds via Paystack:\n[Secure Gateway Link]({pay_url})",
@@ -116,17 +116,32 @@ def run_keep_alive_loops():
     asyncio.run(keep_alive.start_parallel_loops())
 
 def setup_webhook_routing():
-    """ Registers the static route mapping with Telegram servers """
-    time.sleep(6) # Give the web gateway framework container full time to boot
+    """ Registers the static route mapping with Telegram servers using error handling loops """
+    time.sleep(8)  # Let the web server initialize completely first
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
-    print(f"🌐 [WEBHOOK REGISTRY] Deploying static link map parameters to: {webhook_url}")
-    try:
-        bot.remove_webhook()
-        time.sleep(1)
-        bot.set_webhook(url=webhook_url)
-        print("🌐 [WEBHOOK REGISTRY] Webhook pipeline linkage confirmed.")
-    except Exception as e:
-        print(f"❌ Failed to coordinate custom webhook layout settings: {e}")
+    
+    attempts = 0
+    while attempts < 10:
+        print(f"🌐 [WEBHOOK REGISTRY] Connection sync attempt #{attempts + 1} to: {webhook_url}")
+        try:
+            bot.remove_webhook()
+            time.sleep(2)
+            success = bot.set_webhook(url=webhook_url)
+            if success:
+                print("🌐 [WEBHOOK REGISTRY] Webhook pipeline linkage confirmed and active!")
+                return
+        except telebot.apihelper.ApiTelegramException as e:
+            if e.error_code == 429:
+                print("⚠️ [429 Rate Limit] Telegram is busy. Backing off for 15 seconds...")
+                time.sleep(15)
+            else:
+                print(f"❌ Telegram API exception: {e}")
+                time.sleep(5)
+        except Exception as e:
+            print(f"❌ Generic connection fallback issue: {e}")
+            time.sleep(5)
+        attempts += 1
+    print("❌ Critical: Webhook routing pipeline could not be automated.")
 
 if __name__ == "__main__":
     threading.Thread(target=run_java_execution_engine, daemon=True).start()
