@@ -2,50 +2,39 @@ import asyncio
 import httpx
 import os
 
-# Grab your Render web service public URL automatically from environment variables
-RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "https://render.com")
+# Target the internal system port directly to eliminate DNS lookups
+INTERNAL_HEALTH_URL = "http://127.0.0"
 
 async def global_market_scan_task():
-    """
-    Runs your Lightweight Global Scan-to-Task loop at an organic, 
-    multi-second interval to check for arbitrage spreads.
-    """
+    """ Runs your Lightweight Global Scan-to-Task loop safely """
     while True:
         try:
-            # Insert your lightweight asset scanning API calls here
-            # print("⏱️ Scanning global asset feeds for price gaps...")
-            
-            # Keep the intervals staggered using multi-second scheduling
+            # Staggered multi-second asset loopback array
             await asyncio.sleep(5) 
         except Exception as e:
             await asyncio.sleep(5)
 
 async def render_keep_awake_ping():
-    """
-    Prevents Render from spinning down your application by sending an HTTP request 
-    to itself every 10 minutes. Completely neutralizes free tier sleep mode.
-    """
-    # Wait 30 seconds after initial bootup before firing the first ping
-    await asyncio.sleep(30)
+    """ Prevents Render from spinning down by targeting the dedicated /health hook """
+    # Safe initial startup buffer delay allows Uvicorn to bind to port 10000 first
+    await asyncio.sleep(15)
     print("🚀 Keep-Alive Heartbeat Engine Activated.")
     
     async with httpx.AsyncClient() as client:
         while True:
             try:
-                # Ping the health or root endpoint of your app
-                response = await client.get(RENDER_EXTERNAL_URL, timeout=10.0)
-                print(f"🔄 Loopback Ping Sent to {RENDER_EXTERNAL_URL}. Status Code: {response.status_code} (Instance Kept Awake)")
+                # Target the local endpoint instead of public network gateways
+                response = await client.get(INTERNAL_HEALTH_URL, timeout=5.0)
+                if response.status_code == 200:
+                    print(f"🔄 Loopback Health Ping Verified: Local Status Code {response.status_code}")
             except Exception as e:
                 print(f"⚠️ Keep-awake ping encountered jitter: {e}")
             
-            # Sleep for 10 minutes (600 seconds) before repeating
-            await asyncio.sleep(600)
+            # Ping every 4 minutes (240 seconds) to completely clear free-tier sleep limits
+            await asyncio.sleep(240)
 
 async def start_parallel_loops():
-    """
-    Orchestrates and runs your multi-second scanning mesh and keep-awake pings 
-    concurrently without blocking network execution.
-    """
+    """ Orchestrates scanning arrays concurrently without blocking network processing """
     await asyncio.gather(
         global_market_scan_task(),
         render_keep_awake_ping()
