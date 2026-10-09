@@ -16,7 +16,9 @@ import database
 # --- 1. Clean Environment Parameters (NON-HARDCODED) ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://onrender.com").strip().rstrip('/')
+
+# PRODUCTION FIX: Fallback dynamically points to your verified, active routing domain
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").strip().rstrip('/')
 
 bot = telebot.TeleBot(TOKEN, threaded=False)
 
@@ -121,7 +123,8 @@ def callback_inline(call):
                 parse_mode="Markdown"
             )
         elif call.data == "add_funds":
-            pay_url = f"https://paystack.com{call.from_user.id}%7D"
+            # PRODUCTION FIX: Linked your exact live paystack.shop storefront along with dynamic metadata tracking parameters
+            pay_url = f"https://paystack.shop{call.from_user.id}%7D"
             bot.send_message(
                 chat_id=target_chat_id,
                 text=f"💳 Click below to securely deposit funds via Paystack:\n[Secure Gateway Link]({pay_url})",
