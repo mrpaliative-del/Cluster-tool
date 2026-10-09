@@ -284,7 +284,6 @@ app.post('/api/paystack/webhook', express.json(), async (req, res) => {
   }
 
   try {
-    // Cryptographically verify the webhook using HMAC SHA512
     const computedHash = crypto
       .createHmac('sha512', PAYSTACK_SECRET_KEY)
       .update(JSON.stringify(req.body))
@@ -298,19 +297,15 @@ app.post('/api/paystack/webhook', express.json(), async (req, res) => {
 
     if (event && event.event === 'charge.success') {
       const paymentData = event.data;
-      const amountPaidNaira = paymentData.amount / 100; // Convert from kobo
+      const amountPaidNaira = paymentData.amount / 100;
       const customerEmail = paymentData.customer.email;
       const reference = paymentData.reference;
-
-      // Approximate USD equivalent for ledger tracking
       const estimatedUsdValue = Number((amountPaidNaira / 1500).toFixed(2));
 
       console.log(`💳 [Paystack Verified] Received ₦${amountPaidNaira} from ${customerEmail} (Ref: ${reference})`);
 
-      // Commit straight to your zero-DB immutable local ledger
       commitToLocalLedger(`Paystack Client Subscription (${customerEmail})`, 'Direct Fintech Checkout', estimatedUsdValue);
 
-      // Dispatch instant Telegram alert confirming the payment
       if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
         const alertText = `💰 *PAYSTACK PAYMENT RECEIVED*\n\n• Amount: \`₦${amountPaidNaira}\`\n• Customer: ${customerEmail}\n• Reference: \`${reference}\`\n• Status: Logged to Local Ledger`;
         await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -325,6 +320,66 @@ app.post('/api/paystack/webhook', express.json(), async (req, res) => {
   } catch (err) {
     console.error('❌ [Paystack Webhook Error]', err.message);
     res.status(500).send('Internal Server Error');
+  }
+});
+
+// ==========================================
+// PAYSTACK MANUAL LEDGER SYNC ENDPOINT
+// ==========================================
+app.get('/api/paystack/sync-ledger', async (req, res) => {
+  if (!PAYSTACK_SECRET_KEY) {
+    return res.status(400).json({ status: 'error', message: 'Paystack secret key missing.' });
+  }
+
+  try {
+    const response = await fetch('https://api.paystack.co/transaction?status=success&perPage=50', {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const data = await response.json();
+    if (!data.status) {
+      return res.status(400).json({ status: 'error', message: 'Failed to fetch transactions from Paystack' });
+    }
+
+    let syncedCount = 0;
+    const rawData = fs.readFileSync(LEDGER_FILE, 'utf8');
+    const ledger = JSON.parse(rawData);
+    const existingTasks = ledger.completed_tasks.map(t => t.task);
+
+    data.data.forEach(tx => {
+      const taskDescription = `Paystack Sync (${tx.customer.email}) - Ref: ${tx.reference}`;
+      
+      // Prevent duplicates by checking if reference is already logged
+      if (!existingTasks.some(taskStr => taskStr.includes(tx.reference))) {
+        const amountNaira = tx.amount / 100;
+        const usdValue = Number((amountNaira / 1500).toFixed(2));
+        
+        ledger.total_value_captured += usdValue;
+        ledger.completed_tasks.push({
+          task: taskDescription,
+          source: 'Direct Fintech Checkout',
+          value: usdValue,
+          timestamp: tx.created_at || new Date().toISOString()
+        });
+        syncedCount++;
+      }
+    });
+
+    fs.writeFileSync(LEDGER_FILE, JSON.stringify(ledger, null, 2), 'utf8');
+
+    console.log(`🔄 [Ledger Sync] Successfully synced ${syncedCount} missed transactions from Paystack.`);
+    res.status(200).json({
+      status: 'success',
+      message: `Successfully synchronized ${syncedCount} transactions into the local ledger.`,
+      currentLedgerTotalUSD: ledger.total_value_captured
+    });
+  } catch (err) {
+    console.error('❌ [Ledger Sync Error]', err.message);
+    res.status(500).json({ status: 'error', message: err.message });
   }
 });
 
