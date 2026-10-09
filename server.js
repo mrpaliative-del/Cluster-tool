@@ -14,6 +14,7 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 const AFFILIATE_MARKER = process.env.TRAVELPAYOUTS_MARKER || '773479';
 const WEBMONEY_PURSE = process.env.WEBMONEY_PURSE || 'Z-Purse-Configured';
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
 
 // ==========================================
 // ZERO-DB IMMUTABLE LEDGER & HIGH-FREQUENCY STATS
@@ -269,6 +270,62 @@ app.get('/health', (req, res) => {
     stats: revenueStats,
     timestamp: new Date().toISOString()
   });
+});
+
+// ==========================================
+// EMBEDDED PAYSTACK WEBHOOK RECONCILIATION
+// ==========================================
+app.post('/api/paystack/webhook', express.json(), async (req, res) => {
+  const hash = req.headers['x-paystack-signature'];
+  
+  if (!PAYSTACK_SECRET_KEY) {
+    console.error('❌ [Paystack Error] Secret key missing from environment.');
+    return res.status(400).send('Secret key missing');
+  }
+
+  try {
+    // Cryptographically verify the webhook using HMAC SHA512
+    const computedHash = crypto
+      .createHmac('sha512', PAYSTACK_SECRET_KEY)
+      .update(JSON.stringify(req.body))
+      .digest('hex');
+
+    if (hash !== computedHash) {
+      return res.status(401).send('Unauthorized signature');
+    }
+
+    const event = req.body;
+
+    if (event && event.event === 'charge.success') {
+      const paymentData = event.data;
+      const amountPaidNaira = paymentData.amount / 100; // Convert from kobo
+      const customerEmail = paymentData.customer.email;
+      const reference = paymentData.reference;
+
+      // Approximate USD equivalent for ledger tracking
+      const estimatedUsdValue = Number((amountPaidNaira / 1500).toFixed(2));
+
+      console.log(`💳 [Paystack Verified] Received ₦${amountPaidNaira} from ${customerEmail} (Ref: ${reference})`);
+
+      // Commit straight to your zero-DB immutable local ledger
+      commitToLocalLedger(`Paystack Client Subscription (${customerEmail})`, 'Direct Fintech Checkout', estimatedUsdValue);
+
+      // Dispatch instant Telegram alert confirming the payment
+      if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
+        const alertText = `💰 *PAYSTACK PAYMENT RECEIVED*\n\n• Amount: \`₦${amountPaidNaira}\`\n• Customer: ${customerEmail}\n• Reference: \`${reference}\`\n• Status: Logged to Local Ledger`;
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: alertText, parse_mode: 'Markdown' })
+        }).catch(e => {});
+      }
+    }
+
+    res.status(200).send('OK');
+  } catch (err) {
+    console.error('❌ [Paystack Webhook Error]', err.message);
+    res.status(500).send('Internal Server Error');
+  }
 });
 
 // ==========================================
