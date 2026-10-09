@@ -1,10 +1,11 @@
 {
-  "name": "production-revenue-engine",
+  "name": "cluster-tool",
   "version": "1.0.0",
   "description": "Production-ready revenue engine and webhook verification system",
-  "main": "server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node index.js",
+    "build": "echo 'Build step skipped'"
   },
   "dependencies": {
     "express": "^4.19.2"
