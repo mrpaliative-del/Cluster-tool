@@ -18,38 +18,37 @@ RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.c
 # Initialize single-threaded Telebot instance natively
 bot = telebot.TeleBot(TOKEN, threaded=False)
 
-# --- 2. Safe Sequential Lifespan Manager ---
+# --- 2. Non-Blocking Lifespan Architecture ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """ Executes webhook routing setup ONLY after the server port is completely live """
-    # Wait 5 seconds for Render to finish dropping old containers
-    await asyncio.sleep(5)
+    """ Executes webhook link registrations after Uvicorn is bound cleanly """
+    # Let the server clear routing cache pools first
+    await asyncio.sleep(4)
     
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
-    print(f"🌐 [LIFESPAN PROVISION] Mapping webhook pipeline directly to: {webhook_url}")
+    print(f"🌐 [LIFESPAN] Registering webhook endpoint to: {webhook_url}")
     
     try:
         bot.remove_webhook()
         await asyncio.sleep(1)
+        # Register both inbound text strings and interface button callbacks explicitly
         success = bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"])
         if success:
             print("🌐 [LIFESPAN SUCCESS] Webhook pipeline linkage confirmed and active!")
     except Exception as e:
-        print(f"❌ [LIFESPAN FAULT] Webhook registration failed: {e}")
-    
+        print(f"❌ [LIFESPAN FAULT] Webhook setup failed: {e}")
     yield
-    print("⚠️ [LIFESPAN] Application container spinning down.")
 
 app = FastAPI(lifespan=lifespan)
 
-# --- 3. Gateway Routing System ---
+# --- 3. Gateway Routing Array ---
 @app.get("/")
-def home_root():
+def home_mesh_root():
     return {"status": "online"}
 
 @app.get("/health")
-def health_check():
-    """ Dedicated health monitoring hook for keep_alive.py """
+def engine_health_check():
+    """ Explicit GET route endpoint unblocks keep_alive loopback connections """
     return {"status": "ok"}
 
 @app.post("/tg-backend-intake")
@@ -80,13 +79,13 @@ async def paystack_webhook(request: Request):
         amount = data["data"]["amount"] / 100
         if tg_id:
             try:
-                bot.send_message(tg_id, f"✅ *Payment Confirmed!*\nSuccessfully deposited ₦{amount:,.2f} via Paystack into your ledger.", parse_mode="Markdown")
+                bot.send_message(tg_id, f"✅ *Payment Confirmed!*\nSuccessfully deposited ₦{amount:,.2f} via Paystack into your trading ledger.", parse_mode="Markdown")
             except Exception as e:
                 print(f"⚠️ Paystack Telegram notification error: {e}")
             
     return {"status": "success"}
 
-# --- 4. Telegram UI Command Matrix ---
+# --- 4. Bot User Interface Layout Matrix ---
 @bot.message_handler(commands=['start', 'dashboard'])
 def send_welcome(message):
     markup = InlineKeyboardMarkup(row_width=2)
@@ -103,12 +102,14 @@ def send_welcome(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
+    """ Captures event queries immediately from the FastAPI router engine """
     try:
+        # Acknowledge the interaction to instantly stop the user interface loading spinner
         bot.answer_callback_query(callback_query_id=call.id)
         target_chat_id = call.message.chat.id
         
         if call.data == "get_yields":
-            print(f"📊 [UI] Dispatching metrics summary box to Chat ID: {target_chat_id}")
+            print(f"📊 [UI EVENT] Dispatching metrics summary box to Chat ID: {target_chat_id}")
             bot.send_message(
                 chat_id=target_chat_id,
                 text="📈 *Performance Output:*\nToday's Yield: `+1.42%` \nTotal Vault Balance: `₦42,500.00`",
@@ -123,19 +124,23 @@ def callback_inline(call):
                 disable_web_page_preview=True
             )
     except Exception as e:
-        print(f"❌ Error during callback execution processing: {e}")
+        print(f"❌ Critical exception inside callback query context handler: {e}")
 
-# --- 5. Subprocess Lifecycles ---
+# --- 5. Clean Process Spawning Core ---
 def run_java_execution_engine():
-    subprocess.run(["java", "-Xmx256m", "-jar", "engine.jar"])
+    print("☕ [THREAD] Spawning non-blocking Java Hot-Path Subprocess...")
+    # Using Popen prevents the engine jar execution from hijacking the primary process thread
+    subprocess.Popen(["java", "-Xmx192m", "-jar", "engine.jar"])
 
 def run_keep_alive_loops():
     import keep_alive
     asyncio.run(keep_alive.start_parallel_loops())
 
 if __name__ == "__main__":
+    # Launch concurrent infrastructure threads cleanly alongside primary context
     threading.Thread(target=run_java_execution_engine, daemon=True).start()
     threading.Thread(target=run_keep_alive_loops, daemon=True).start()
 
+    # Bind Uvicorn server gateway loop explicitly
     port = int(os.getenv("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
