@@ -13,7 +13,7 @@ COPY src/ ./src/
 RUN mvn clean package -DskipTests
 
 # Stage 2: Setup Python & Playwright Runtime
-FROM python:3.10-slim-buster
+FROM python:3.10-slim-bookworm
 
 # Install system dependencies and Java runtime for the final image
 RUN apt-get update && apt-get install -y \
