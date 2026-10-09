@@ -5,36 +5,55 @@ import uvicorn
 import hmac
 import hashlib
 import telebot
-import time
+import asyncio
 from fastapi import FastAPI, Request, Response, status
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
+from contextlib import asynccontextmanager
 
-# --- 1. Clean Environment Parameters (Hardwired Fallbacks) ---
+# --- 1. Clean Environment Parameters ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-
-# Force clean, accurate root domain strings to prevent routing failure drops
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").strip().rstrip('/')
 
 # Initialize single-threaded Telebot instance natively
 bot = telebot.TeleBot(TOKEN, threaded=False)
-app = FastAPI()
 
+# --- 2. Safe Sequential Lifespan Manager ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """ Executes webhook routing setup ONLY after the server port is completely live """
+    # Wait 5 seconds for Render to finish dropping old containers
+    await asyncio.sleep(5)
+    
+    webhook_url = f"{RENDER_URL}/tg-backend-intake"
+    print(f"🌐 [LIFESPAN PROVISION] Mapping webhook pipeline directly to: {webhook_url}")
+    
+    try:
+        bot.remove_webhook()
+        await asyncio.sleep(1)
+        success = bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"])
+        if success:
+            print("🌐 [LIFESPAN SUCCESS] Webhook pipeline linkage confirmed and active!")
+    except Exception as e:
+        print(f"❌ [LIFESPAN FAULT] Webhook registration failed: {e}")
+    
+    yield
+    print("⚠️ [LIFESPAN] Application container spinning down.")
+
+app = FastAPI(lifespan=lifespan)
+
+# --- 3. Gateway Routing System ---
 @app.get("/")
-def health_check():
-    return {"status": "online", "mode": "production_webhook_mesh", "timestamp": time.time()}
+def home_root():
+    return {"status": "online"}
 
 @app.get("/health")
-def internal_health():
-    """ Dedicated internal health monitoring hook for keep_alive.py """
+def health_check():
+    """ Dedicated health monitoring hook for keep_alive.py """
     return {"status": "ok"}
 
-# --- 2. Combined Telegram Webhook Intake Engine ---
-@app.api_route("/tg-backend-intake", methods=["GET", "POST"])
+@app.post("/tg-backend-intake")
 async def telegram_webhook_router(request: Request):
-    if request.method == "GET":
-        return {"status": "active", "info": "Webhook endpoint online"}
-        
     try:
         json_data = await request.json()
         update = Update.de_json(json_data)
@@ -42,9 +61,8 @@ async def telegram_webhook_router(request: Request):
         return {"status": "processed"}
     except Exception as e:
         print(f"⚠️ Webhook data handler parsing error: {e}")
-        return {"status": "error", "detail": str(e)}
+        return Response(content=str(e), status_code=500)
 
-# --- 3. Paystack Financial Webhook Portal ---
 @app.post("/paystack-webhook")
 async def paystack_webhook(request: Request):
     payload = await request.body()
@@ -85,9 +103,7 @@ def send_welcome(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
-    """ Processes user dashboard button interactions cleanly """
     try:
-        # Halt the loading spinner animation on the user's screen instantly
         bot.answer_callback_query(callback_query_id=call.id)
         target_chat_id = call.message.chat.id
         
@@ -99,8 +115,6 @@ def callback_inline(call):
                 parse_mode="Markdown"
             )
         elif call.data == "add_funds":
-            print(f"💳 [UI] Compiling dynamic Paystack token gateway link for user ID: {call.from_user.id}")
-            # Fixed URL interpolation string template avoids character mutation crashes completely
             pay_url = f"https://paystack.com{call.from_user.id}%7D"
             bot.send_message(
                 chat_id=target_chat_id,
@@ -113,39 +127,15 @@ def callback_inline(call):
 
 # --- 5. Subprocess Lifecycles ---
 def run_java_execution_engine():
-    print("☕ [THREAD] Launching High-Speed Java Execution Block off-heap...")
     subprocess.run(["java", "-Xmx256m", "-jar", "engine.jar"])
 
 def run_keep_alive_loops():
-    print("🚀 [THREAD] Activating Multi-Second Scanners and Keep-Awake Workarounds...")
     import keep_alive
-    import asyncio
     asyncio.run(keep_alive.start_parallel_loops())
-
-def setup_webhook_routing():
-    """ Registers connection parameters after Uvicorn is completely listening """
-    time.sleep(12)  
-    webhook_url = f"{RENDER_URL}/tg-backend-intake"
-    
-    attempts = 0
-    while attempts < 5:
-        print(f"🌐 [WEBHOOK REGISTRY] Sync attempt #{attempts + 1} mapping to: {webhook_url}")
-        try:
-            bot.remove_webhook()
-            time.sleep(2)
-            success = bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"])
-            if success:
-                print("🌐 [WEBHOOK REGISTRY] Webhook pipeline linkage confirmed and active!")
-                return
-        except Exception as e:
-            print(f"❌ Network sync error: {e}")
-            time.sleep(5)
-        attempts += 1
 
 if __name__ == "__main__":
     threading.Thread(target=run_java_execution_engine, daemon=True).start()
     threading.Thread(target=run_keep_alive_loops, daemon=True).start()
-    threading.Thread(target=setup_webhook_routing, daemon=True).start()
 
     port = int(os.getenv("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
