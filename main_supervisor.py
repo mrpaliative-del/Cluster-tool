@@ -6,6 +6,7 @@ import hmac
 import hashlib
 import telebot
 import time
+import httpx
 from fastapi import FastAPI, Request, Response, status
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 
@@ -22,20 +23,38 @@ app = FastAPI()
 def health_check():
     return {"status": "online", "mode": "production_webhook_mesh", "timestamp": time.time()}
 
-# --- 1. Telegram Webhook Intake Engine ---
+# --- 1. Manual Force-Sync Recovery Endpoint ---
+@app.get("/force-sync")
+def force_sync_webhook():
+    """
+    Open this endpoint in your mobile browser to hardwire 
+    the connection if Telegram stops responding.
+    """
+    webhook_url = f"{RENDER_URL}/tg-webhook/{TOKEN}"
+    try:
+        bot.remove_webhook()
+        time.sleep(1)
+        success = bot.set_webhook(url=webhook_url)
+        if success:
+            return {"status": "success", "message": f"Pipeline hardwired to: {webhook_url}"}
+        return {"status": "failed", "message": "Telegram rejected the endpoint link configuration."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# --- 2. Telegram Webhook Intake Engine ---
 @app.post(f"/tg-webhook/{TOKEN}")
 async def telegram_webhook_router(request: Request):
-    """ Receives all real-time webhook payloads from Telegram """
+    """ Receives all real-time events directly from Telegram """
     try:
         json_data = await request.json()
         update = Update.de_json(json_data)
         bot.process_new_updates([update])
         return {"status": "processed"}
     except Exception as e:
-        print(f"⚠️ Webhook intake processing error: {e}")
+        print(f"⚠️ Webhook processing breakdown: {e}")
         return {"status": "error", "detail": str(e)}
 
-# --- 2. Paystack Financial Webhook ---
+# --- 3. Paystack Financial Webhook ---
 @app.post("/paystack-webhook")
 async def paystack_webhook(request: Request):
     payload = await request.body()
@@ -60,7 +79,7 @@ async def paystack_webhook(request: Request):
             
     return {"status": "success"}
 
-# --- 3. Telegram UI Component Logic ---
+# --- 4. Telegram UI Component Logic ---
 @bot.message_handler(commands=['start', 'dashboard'])
 def send_welcome(message):
     markup = InlineKeyboardMarkup(row_width=2)
@@ -79,9 +98,6 @@ def send_welcome(message):
 def callback_inline(call):
     """ Main intake logic processing button callback events """
     try:
-        # Crucial: Always notify Telegram immediately that the button was tapped
-        bot.answer_callback_query(callback_query_id=call.id)
-        
         if call.data == "get_yields":
             print(f"📊 [UI] Dispatching metrics summary box to user ID: {call.from_user.id}")
             bot.send_message(
@@ -91,7 +107,6 @@ def callback_inline(call):
             )
         elif call.data == "add_funds":
             print(f"💳 [UI] Compiling dynamic Paystack token gateway link for user ID: {call.from_user.id}")
-            # Corrected string generation using standard clean syntax parameters
             pay_url = f"https://paystack.com{{\"telegram_id\":{call.from_user.id}}}"
             bot.send_message(
                 chat_id=call.message.chat.id,
@@ -99,10 +114,12 @@ def callback_inline(call):
                 parse_mode="Markdown",
                 disable_web_page_preview=True
             )
+        # Inform Telegram the click was intercepted successfully
+        bot.answer_callback_query(callback_query_id=call.id)
     except Exception as e:
         print(f"❌ Exception error occurred within button query loop: {e}")
 
-# --- 4. System Subprocesses ---
+# --- 5. System Subprocesses ---
 def run_java_execution_engine():
     print("☕ [THREAD] Launching High-Speed Java Execution Block off-heap...")
     subprocess.run(["java", "-Xmx256m", "-jar", "engine.jar"])
@@ -113,22 +130,9 @@ def run_keep_alive_loops():
     import asyncio
     asyncio.run(keep_alive.start_parallel_loops())
 
-def setup_webhook_routing():
-    """ Safely hooks Telegram server traffic endpoints to Render URL """
-    time.sleep(4)
-    webhook_url = f"{RENDER_URL}/tg-webhook/{TOKEN}"
-    print(f"🌐 [WEBHOOK CONNECTION] Synchronizing endpoint URL: {webhook_url}")
-    try:
-        bot.remove_webhook()
-        bot.set_webhook(url=webhook_url)
-        print("🌐 [WEBHOOK CONNECTION] Synchronization completed successfully.")
-    except Exception as e:
-        print(f"❌ Failed to set webhook routing line: {e}")
-
 if __name__ == "__main__":
     threading.Thread(target=run_java_execution_engine, daemon=True).start()
     threading.Thread(target=run_keep_alive_loops, daemon=True).start()
-    threading.Thread(target=setup_webhook_routing, daemon=True).start()
 
     # Launch FastAPI portal gateway
     port = int(os.getenv("PORT", 10000))
