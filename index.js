@@ -479,3 +479,127 @@ ${(wallet.signals || []).slice(0, 10).map(s => `
                             `).join('')}
                         </div>
                     </div>
+    // Dashboard UI
+    if (req.method === 'GET' && (pathname === '/' || pathname === '/dashboard')) {
+        let wallet = { accumulated_usd: 0.0, total_withdrawn_usd: 0.0, events: [], signals: [] };
+        try {
+            if (fs.existsSync(WALLET_FILE)) {
+                wallet = JSON.parse(fs.readFileSync(WALLET_FILE, 'utf8'));
+            }
+        } catch (e) {}
+
+        const uptimeMin = Math.floor((Date.now() - metrics.uptimeStarted) / 60000);
+
+        // Build signals HTML safely without nested backtick collisions
+        let signalsHtml = '';
+        const signalsList = wallet.signals || [];
+        if (signalsList.length === 0) {
+            signalsHtml = '<p style="color: #64748b;">No live network queries executed yet. Click "Query Live API Feeds" above.</p>';
+        } else {
+            signalsHtml = signalsList.slice(0, 10).map(s => {
+                let targetBtn = '';
+                if (s.target_url) {
+                    targetBtn = `<a href="${s.target_url}" target="_blank" style="color: #38bdf8; font-size: 11px; text-decoration: none; background: #0369a133; padding: 4px 10px; border-radius: 4px; border: 1px solid #0369a1; display: inline-block; margin-top: 4px;">Launch Live Affiliate Stream &rarr;</a>`;
+                }
+                return '<div class="item" style="flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px 0;">' +
+                       '<div style="display: flex; justify-content: space-between; width: 100%;">' +
+                       '<span><strong>[' + s.sector + ']</strong> ' + (s.route || s.metric) + ' - <em>' + s.status + '</em></span>' +
+                       '<span class="val">Est: $' + s.estimated_value_usd.toFixed(2) + '</span>' +
+                       '</div>' + targetBtn + '</div>';
+            }).join('');
+        }
+
+        // Build events HTML safely
+        let eventsHtml = '';
+        const eventsList = wallet.events || [];
+        if (eventsList.length === 0) {
+            eventsHtml = '<p style="color: #64748b;">Waiting for incoming Paystack webhooks...</p>';
+        } else {
+            eventsHtml = eventsList.map(e => {
+                return '<div class="item"><span>[' + e.sector + '] Ref: ' + e.reference + '</span><span class="val">+$' + e.usd_value.toFixed(2) + '</span></div>';
+            }).join('');
+        }
+
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        return res.end(`
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Omni-Task Ecosystem Gateway</title>
+                <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #090d16; color: #f1f5f9; padding: 20px; margin: 0; }
+                    .container { max-width: 950px; margin: 0 auto; }
+                    header { text-align: center; padding: 15px 0 25px 0; }
+                    h1 { color: #38bdf8; font-size: 24px; margin-bottom: 5px; }
+                    .subtitle { color: #94a3b8; font-size: 13px; }
+                    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+                    .card { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 18px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.2); }
+                    .card h3 { margin-top: 0; color: #f8fafc; font-size: 15px; border-bottom: 1px solid #1f2937; padding-bottom: 8px; }
+                    .metric { color: #4ade80; font-size: 28px; font-weight: bold; margin: 8px 0; }
+                    .btn { background: #0284c7; color: white; padding: 10px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block; border: none; cursor: pointer; font-size: 13px; transition: background 0.2s; }
+                    .btn:hover { background: #0369a1; }
+                    .btn-green { background: #16a34a; }
+                    .btn-green:hover { background: #15803d; }
+                    .list { max-height: 220px; overflow-y: auto; font-size: 12px; }
+                    .item { padding: 6px 0; border-bottom: 1px solid #1f2937; display: flex; justify-content: space-between; color: #cbd5e1; }
+                    .val { color: #4ade80; font-weight: bold; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <header>
+                        <h1>⚡ Omni-Task Ecosystem Gateway</h1>
+                        <p class="subtitle">Live Production Mode &bull; Marker: ${TRAVELPAYOUTS_MARKER} &bull; Uptime: ${uptimeMin}m</p>
+                    </header>
+
+                    <div class="grid">
+                        <div class="card">
+                            <h3>Verified Wallet Ledger</h3>
+                            <div class="metric">$${Number(wallet.accumulated_usd || 0).toFixed(2)}</div>
+                            <p style="color: #94a3b8; font-size: 12px; margin: 0 0 12px 0;">Captured Settlements: <strong>${eventsList.length}</strong></p>
+                            <button class="btn btn-green" onclick="triggerScan()">Query Live API Feeds ⚡</button>
+                        </div>
+
+                        <div class="card">
+                            <h3>Connected High-Traffic Rails</h3>
+                            <p style="color: #94a3b8; font-size: 12px; line-height: 1.5;">
+                                Interfacing with live global APIs (Travelpayouts & Paystack) to capture actual market pricing and transaction webhooks without simulations.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-bottom: 15px;">
+                        <h3>Live Network Signals & Market Data</h3>
+                        <div class="list">
+                            ${signalsHtml}
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Verified Settlement History</h3>
+                        <div class="list">
+                            ${eventsHtml}
+                        </div>
+                    </div>
+                </div>
+
+                <script>
+                    async function triggerScan() {
+                        const btn = document.querySelector('.btn-green');
+                        btn.innerText = 'Querying Live APIs...';
+                        const res = await fetch('/scan-signals', { method: 'POST' });
+                        const data = await res.json();
+                        if (data.status === 'success') {
+                            window.location.reload();
+                        } else {
+                            alert('Query failed.');
+                            btn.innerText = 'Query Live API Feeds ⚡';
+                        }
+                    }
+                </script>
+            </body>
+            </html>
+        `);
+    }
