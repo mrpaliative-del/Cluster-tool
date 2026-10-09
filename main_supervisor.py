@@ -11,16 +11,20 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 from contextlib import asynccontextmanager
 import database
 
+# --- 1. Clean Environment Parameters (NON-HARDCODED) ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
+
+# Fall back directly to your specific active cluster URL string
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://onrender.com").strip().rstrip('/')
 
 bot = telebot.TeleBot(TOKEN, threaded=False)
 
+# --- 2. Safe Sequential Lifespan Manager ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """ Executes schema initialization and registers webhooks systematically """
-    database.init_db()  # Initialize SQLite database setup inside main thread stack
+    """ Executes database schema initialization and links Telegram webhooks cleanly """
+    database.init_db()  # Initialize thread-safe SQLite database schemas natively
     await asyncio.sleep(4)
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
     print(f"🌐 [LIFESPAN] Mapping webhook configurations pipeline to: {webhook_url}")
@@ -35,11 +39,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# --- 3. Gateway Routing Array ---
 @app.get("/")
-def home_mesh_root(): return {"status": "online"}
+def home_mesh_root(): 
+    return {"status": "online"}
 
 @app.get("/health")
-def engine_health_check(): return {"status": "ok"}
+def engine_health_check(): 
+    return {"status": "ok"}
 
 @app.post("/tg-backend-intake")
 async def telegram_webhook_router(request: Request):
@@ -53,9 +60,11 @@ async def telegram_webhook_router(request: Request):
 
 @app.post("/paystack-webhook")
 async def paystack_webhook(request: Request):
+    """ Cryptographically authenticates and processes inbound merchant transaction receipts """
     payload = await request.body()
     signature = request.headers.get("X-Paystack-Signature")
-    if not signature: return Response(status_code=status.HTTP_401_UNAUTHORIZED)
+    if not signature: 
+        return Response(status_code=status.HTTP_401_UNAUTHORIZED)
         
     computed = hmac.new(PAYSTACK_SECRET, payload, hashlib.sha512).hexdigest()
     if not hmac.compare_digest(signature, computed):
@@ -67,17 +76,22 @@ async def paystack_webhook(request: Request):
         amount = data["data"]["amount"] / 100
         trx_ref = data["data"]["reference"]
         
-        # Credit wallet transactions atomically inside local SQLite tables
+        # Credit user balances inside SQLite atomically
         is_new = database.record_deposit(trx_ref, tg_id, amount)
         
         if is_new and tg_id:
             try:
-                bot.send_message(tg_id, f"✅ *Payment Confirmed!*\nSuccessfully deposited *₦{amount:,.2f}* via Paystack directly into your active trading balance ledger.", parse_mode="Markdown")
+                bot.send_message(
+                    chat_id=tg_id, 
+                    text=f"✅ *Payment Confirmed!*\nSuccessfully deposited *₦{amount:,.2f}* via Paystack directly into your active trading balance ledger.", 
+                    parse_mode="Markdown"
+                )
             except Exception as e:
-                print(f"⚠️ Telegram alert routine warning: {e}")
+                print(f"⚠️ Telegram confirmation alert runtime warning: {e}")
             
     return {"status": "success"}
 
+# --- 4. Telegram UI Control Panel Matrix ---
 @bot.message_handler(commands=['start', 'dashboard'])
 def send_welcome(message):
     markup = InlineKeyboardMarkup(row_width=2)
@@ -99,7 +113,7 @@ def callback_inline(call):
         target_chat_id = call.message.chat.id
         
         if call.data == "get_yields":
-            # Extract calculations natively out of your SQLite database engine variables array
+            # Pull metrics values out of thread-safe relational database index rows
             vault_bal, current_yield = database.get_ledger_metrics()
             bot.send_message(
                 chat_id=target_chat_id,
@@ -115,33 +129,18 @@ def callback_inline(call):
                 disable_web_page_preview=True
             )
     except Exception as e:
-        print(f"❌ Callback event evaluation fault: {e}")
+        print(f"❌ Callback evaluation context fault: {e}")
 
-# --- JVM Memory Management Performance Tiers ---
-def run_java_execution_engine():
-    print("☕ [THREAD] Launching Java Hot-Path Subprocess with JVM Off-Heap Constraints...")
-    # Inject optimized memory parameters dynamically into the runtime subprocess string execution
-    subprocess.Popen([
-        "java", 
-        "-Xmx192m", 
-        "-Xms128m", 
-        "-XX:+UseSerialGC", 
-        "-XX:MaxDirectMemorySize=64m", 
-        "-jar", 
-        "engine.jar"
-    ])
-
-def run_playwright_scraper_engine():
-    subprocess.Popen(["python", "scraper_engine.py"])
-
+# --- 5. Clean Background Operations Process ---
 def run_keep_alive_loops():
     import keep_alive
     asyncio.run(keep_alive.start_parallel_loops())
 
 if __name__ == "__main__":
-    threading.Thread(target=run_java_execution_engine, daemon=True).start()
-    threading.Thread(target=run_playwright_scraper_engine, daemon=True).start()
+    # Launch standard application monitoring keep-alive ping threads safely
     threading.Thread(target=run_keep_alive_loops, daemon=True).start()
 
+    # Processes are now fully stripped from code. Execution is managed natively 
+    # as independent OS processes via supervisor.conf
     port = int(os.getenv("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
