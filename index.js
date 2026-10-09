@@ -3,7 +3,7 @@
  * OMNI-TASK ENGINE: INDUSTRIAL PRODUCTION REVENUE GATEWAY + 20-MODULE SENTINEL
  * ============================================================================
  * File: index.js
- * Version: 9.2.0-Production-Live
+ * Version: 9.3.0-Production-Live
  * ============================================================================
  */
 
@@ -37,8 +37,15 @@ function initializeStorageFiles() {
         fs.writeFileSync(TASKS_FILE, JSON.stringify({ tasks: [] }, null, 2));
     }
     if (!fs.existsSync(WALLET_FILE)) {
-        const initialWallet = { accumulated_usd: 0.0, total_withdrawn_usd: 0.0, payouts_count: 0 };
+        const initialWallet = { accumulated_usd: 0.0, total_withdrawn_usd: 0.0, payouts_count: 0, events: [] };
         fs.writeFileSync(WALLET_FILE, JSON.stringify(initialWallet, null, 2));
+    } else {
+        // Ensure events array exists in wallet file
+        const wallet = JSON.parse(fs.readFileSync(WALLET_FILE, 'utf8'));
+        if (!wallet.events) {
+            wallet.events = [];
+            fs.writeFileSync(WALLET_FILE, JSON.stringify(wallet, null, 2));
+        }
     }
 }
 initializeStorageFiles();
@@ -257,29 +264,114 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ status: 'success', totalModules: ECOSYSTEM_MODULES.length, diagnostics }, null, 2));
     }
 
-    const walletData = JSON.parse(fs.readFileSync(WALLET_FILE, 'utf8'));
+    // Health JSON endpoint
+    if (req.method === 'GET' && pathname === '/health') {
+        const walletData = JSON.parse(fs.readFileSync(WALLET_FILE, 'utf8'));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({
+            status: 'online',
+            service: 'Production Revenue & Webhook Gateway',
+            version: '9.3.0-Production-Live',
+            walletBalanceUSD: walletData.accumulated_usd,
+            activeModulesCount: ECOSYSTEM_MODULES.length,
+            opayRecipientConfigured: Boolean(OPAY_RECIPIENT_CODE),
+            metrics: {
+                ...metrics,
+                uptime_seconds: Math.floor((Date.now() - metrics.uptimeStarted) / 1000)
+            },
+            timestamp: new Date().toISOString()
+        }));
+    }
 
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-        status: 'online',
-        service: 'Production Revenue & Webhook Gateway + 20 Sentinel Modules',
-        version: '9.2.0-Production-Live',
-        walletBalanceUSD: walletData.accumulated_usd,
-        activeModulesCount: ECOSYSTEM_MODULES.length,
-        opayRecipientConfigured: Boolean(OPAY_RECIPIENT_CODE),
-        metrics: {
-            ...metrics,
-            uptime_seconds: Math.floor((Date.now() - metrics.uptimeStarted) / 1000)
-        },
-        timestamp: new Date().toISOString()
-    }));
+    // ==========================================
+    // FRONTEND CONTROL CENTER DASHBOARD UI
+    // ==========================================
+    if (req.method === 'GET' && (pathname === '/' || pathname === '/dashboard')) {
+        let wallet = { accumulated_usd: 0.0, total_withdrawn_usd: 0.0, payouts_count: 0, events: [] };
+        try {
+            if (fs.existsSync(WALLET_FILE)) {
+                wallet = JSON.parse(fs.readFileSync(WALLET_FILE, 'utf8'));
+                if (!wallet.events) wallet.events = [];
+            }
+        } catch (e) {}
+
+        const uptimeMin = Math.floor((Date.now() - metrics.uptimeStarted) / 60000);
+
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        return res.end(`
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Production Revenue Gateway Control Center</title>
+                <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 25px; margin: 0; }
+                    .container { max-width: 950px; margin: 0 auto; }
+                    header { text-align: center; padding: 20px 0 35px 0; }
+                    h1 { color: #38bdf8; font-size: 26px; margin-bottom: 5px; }
+                    .subtitle { color: #94a3b8; font-size: 14px; }
+                    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px; }
+                    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+                    .card h3 { margin-top: 0; color: #f1f5f9; font-size: 16px; border-bottom: 1px solid #334155; padding-bottom: 10px; }
+                    .metric { color: #4ade80; font-size: 32px; font-weight: bold; margin: 10px 0; }
+                    .btn { background: #0284c7; color: white; padding: 10px 16px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block; transition: background 0.2s; border: none; cursor: pointer; }
+                    .btn:hover { background: #0369a1; }
+                    .event-list { max-height: 250px; overflow-y: auto; font-size: 13px; }
+                    .event-item { padding: 8px 0; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; color: #cbd5e1; }
+                    .event-val { color: #4ade80; font-weight: bold; }
+                    ul { padding-left: 20px; font-size: 13px; color: #94a3b8; }
+                    li { margin-bottom: 6px; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <header>
+                        <h1>⚡ Production Revenue Gateway</h1>
+                        <p class="subtitle">Live Verified Fintech &bull; Zero-DB Immutable Ledger &bull; Uptime: ${uptimeMin} mins</p>                     </header>                      <div class="grid">                         <div class="card">                             <h3>Verified Wallet Balance</h3>                             <div class="metric">$${Number(wallet.accumulated_usd || 0).toFixed(2)}</div>
+                            <p style="color: #94a3b8; font-size: 13px; margin: 0;">Total Verified Transactions: <strong>${wallet.events.length}</strong></p>
+                            <br>
+                            <a href="/health" class="btn" target="_blank">View Health JSON →</a>
+                        </div>
+
+                        <div class="card">
+                            <h3>Active Sentinel Vectors</h3>
+                            <ul>
+                                <li><strong>Fintech & Paystack:</strong> HMAC Webhooks & Direct API</li>
+                                <li><strong>SEO & Google:</strong> SERP, Index & Compliance Scans</li>
+                                <li><strong>Tech Infrastructure:</strong> Cloud, LLMs & DNS Drift</li>
+                                <li><strong>Travel Arbitrage:</strong> Affiliate & Flight Corridors</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Verified Ledger Events</h3>
+                        <div class="event-list">
+                            ${wallet.events.length === 0 ? '<p style="color: #64748b;">No transactions recorded yet. Waiting for live Paystack webhooks...</p>' : ''}
+                            ${wallet.events.slice(0, 15).map(e => `
+                                <div class="event-item">
+                                    <span>[${e.sector || 'Checkout'}] Ref: ${e.reference || 'N/A'}</span>
+                                    <span class="event-val">+$${Number(e.usd_value || 0).toFixed(2)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'error', message: 'Not found' }));
 });
 
 // START HTTP SERVER INSTANTLY
 server.listen(PORT, async () => {
     console.log(`🌐 [Server] Production HTTP listener bound securely on port ${PORT}`);
     startSelfPingDaemon();
-    await dispatchTelegramMessage("🟢 *Production Revenue Gateway & 20-Module Sentinel Online.* Simulations removed. Live webhooks & diagnostics active.", false);
+    await dispatchTelegramMessage("🟢 *Production Revenue Gateway Online.* Dashboard UI & Webhooks active.", false);
 });
 
 // ==========================================
@@ -288,7 +380,7 @@ server.listen(PORT, async () => {
 function startSelfPingDaemon() {
     const PING_INTERVAL_MS = 10 * 60 * 1000;
     setInterval(() => {
-        http.get(`http://localhost:${PORT}/`, (res) => {
+        http.get(`http://localhost:${PORT}/health`, (res) => {
             res.on('data', () => {});
             res.on('end', () => {});
         }).on('error', () => {});
@@ -342,12 +434,24 @@ function sendWebhookAlert(taskId, amountNGN, reference, sector) {
 // 7. REAL WALLET ACCUMULATION
 // ==========================================
 async function creditWalletWithRealPayment(taskId, amountNgn, amountUsd, sector) {
-    let wallet = { accumulated_usd: 0.0, total_withdrawn_usd: 0.0, payouts_count: 0 };
+    let wallet = { accumulated_usd: 0.0, total_withdrawn_usd: 0.0, payouts_count: 0, events: [] };
     if (fs.existsSync(WALLET_FILE)) {
         wallet = JSON.parse(fs.readFileSync(WALLET_FILE, 'utf8'));
+        if (!wallet.events) wallet.events = [];
     }
 
     wallet.accumulated_usd += amountUsd;
+    wallet.events.unshift({
+        task_id: taskId,
+        sector: sector,
+        amount_ngn: amountNgn,
+        usd_value: amountUsd,
+        reference: taskId,
+        timestamp: new Date().toISOString()
+    });
+
+    if (wallet.events.length > 100) wallet.events = wallet.events.slice(0, 100);
+
     metrics.totalWebhooksProcessed++;
     metrics.realRevenueCapturedUSD += amountUsd;
     metrics.lastActiveTimestamp = new Date().toISOString();
