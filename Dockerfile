@@ -3,7 +3,7 @@
 # ==========================================
 FROM eclipse-temurin:17-jdk-alpine AS java-builder
 WORKDIR /build
-# Copy your maven or gradle configuration files
+# Copy your maven configuration files
 COPY .mvn/ .mvn
 COPY mvnw pom.xml ./
 # Download dependencies out-of-band to cache them safely on GitHub
@@ -18,9 +18,9 @@ RUN ./mvnw clean package -DskipTests
 FROM python:3.10-slim-buster
 WORKDIR /app
 
-# Install OpenJDK runtime (for running the JAR) and minimal network tools
+# Install OpenJDK 17 runtime (matched to Java 17 compiler) and minimal network tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openjdk-11-jre-headless \
+    openjdk-17-jre-headless \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
