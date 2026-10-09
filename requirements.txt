@@ -3,3 +3,5 @@ uvicorn==0.28.0
 httpx==0.27.0
 pyTelegramBotAPI==4.16.0
 playwright==1.42.0
+playwright==1.42.0
+httpx==0.26.0
