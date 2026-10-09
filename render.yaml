@@ -1,0 +1,14 @@
+services:
+  # A unified, multi-threaded free service combining Python, Java, and your automation tasks
+  - type: web
+    name: free-arbitrage-mesh
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free # Specifies Render's $0 forever-free tier
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        value: "YOUR_FREE_BOT_TOKEN"
+      - key: PYTHON_ENV
+        value: "production"
+      - key: JAVA_OPTS
+        value: "-Xmx300m" # Optimized to keep Java memory strictly under Render's free 512MB RAM cap
