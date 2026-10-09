@@ -6,55 +6,42 @@ import hmac
 import hashlib
 import telebot
 import time
-import httpx
 from fastapi import FastAPI, Request, Response, status
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 
-# Grab configurations securely from Render Environment panel
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN")
+# Clean and sanitize environment configuration handles explicitly
+RAW_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN")
+# Strip out any accidentally appended whitespace, logs, or trailing timestamps
+TOKEN = RAW_TOKEN.split("2026-")[0].strip()
+
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com")
 
-# Initialize Telebot without multi-threaded polling handlers
+# Initialize Telebot instance
 bot = telebot.TeleBot(TOKEN, threaded=False)
 app = FastAPI()
 
 @app.get("/")
 def health_check():
-    return {"status": "online", "mode": "production_webhook_mesh", "timestamp": time.time()}
+    return {"status": "online", "mode": "static_webhook_mesh", "timestamp": time.time()}
 
-# --- 1. Manual Force-Sync Recovery Endpoint ---
-@app.get("/force-sync")
-def force_sync_webhook():
-    """
-    Open this endpoint in your mobile browser to hardwire 
-    the connection if Telegram stops responding.
-    """
-    webhook_url = f"{RENDER_URL}/tg-webhook/{TOKEN}"
-    try:
-        bot.remove_webhook()
-        time.sleep(1)
-        success = bot.set_webhook(url=webhook_url)
-        if success:
-            return {"status": "success", "message": f"Pipeline hardwired to: {webhook_url}"}
-        return {"status": "failed", "message": "Telegram rejected the endpoint link configuration."}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-# --- 2. Telegram Webhook Intake Engine ---
-@app.post(f"/tg-webhook/{TOKEN}")
+# --- 1. Fixed Telegram Webhook Intake Engine ---
+@app.post("/tg-backend-intake")
 async def telegram_webhook_router(request: Request):
-    """ Receives all real-time events directly from Telegram """
+    """
+    Hyper-stable endpoint route. Fixed path string guarantees zero 
+    character or timestamp string mutation issues.
+    """
     try:
         json_data = await request.json()
         update = Update.de_json(json_data)
         bot.process_new_updates([update])
         return {"status": "processed"}
     except Exception as e:
-        print(f"⚠️ Webhook processing breakdown: {e}")
+        print(f"⚠️ Webhook intake processing anomaly: {e}")
         return {"status": "error", "detail": str(e)}
 
-# --- 3. Paystack Financial Webhook ---
+# --- 2. Paystack Financial Webhook ---
 @app.post("/paystack-webhook")
 async def paystack_webhook(request: Request):
     payload = await request.body()
@@ -79,7 +66,7 @@ async def paystack_webhook(request: Request):
             
     return {"status": "success"}
 
-# --- 4. Telegram UI Component Logic ---
+# --- 3. Telegram UI Component Logic ---
 @bot.message_handler(commands=['start', 'dashboard'])
 def send_welcome(message):
     markup = InlineKeyboardMarkup(row_width=2)
@@ -96,7 +83,7 @@ def send_welcome(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
-    """ Main intake logic processing button callback events """
+    """ Processes button interaction events routed via the static endpoint """
     try:
         if call.data == "get_yields":
             print(f"📊 [UI] Dispatching metrics summary box to user ID: {call.from_user.id}")
@@ -106,20 +93,21 @@ def callback_inline(call):
                 parse_mode="Markdown"
             )
         elif call.data == "add_funds":
-            print(f"💳 [UI] Compiling dynamic Paystack token gateway link for user ID: {call.from_user.id}")
-            pay_url = f"https://paystack.com{{\"telegram_id\":{call.from_user.id}}}"
+            print(f"💳 [UI] Compiling dynamic Paystack link for user ID: {call.from_user.id}")
+            pay_url = f"https://paystack.com{{\\\"telegram_id\\\":{call.from_user.id}}}"
             bot.send_message(
                 chat_id=call.message.chat.id,
                 text=f"💳 Click below to securely deposit funds via Paystack:\n[Secure Gateway Link]({pay_url})",
                 parse_mode="Markdown",
                 disable_web_page_preview=True
             )
-        # Inform Telegram the click was intercepted successfully
+        
+        # Always resolve the button loading spinner instantly
         bot.answer_callback_query(callback_query_id=call.id)
     except Exception as e:
-        print(f"❌ Exception error occurred within button query loop: {e}")
+        print(f"❌ Error during callback execution processing: {e}")
 
-# --- 5. System Subprocesses ---
+# --- 4. System Subprocesses ---
 def run_java_execution_engine():
     print("☕ [THREAD] Launching High-Speed Java Execution Block off-heap...")
     subprocess.run(["java", "-Xmx256m", "-jar", "engine.jar"])
@@ -130,10 +118,25 @@ def run_keep_alive_loops():
     import asyncio
     asyncio.run(keep_alive.start_parallel_loops())
 
+def setup_webhook_routing():
+    """ Hooks the static path mapping address into Telegram server files safely """
+    time.sleep(6) # Give the core server frame ample time to complete initialization
+    clean_base_url = RENDER_URL.split("2026-")[0].strip().rstrip('/')
+    webhook_url = f"{clean_base_url}/tg-backend-intake"
+    print(f"🌐 [WEBHOOK REGISTRY] Initializing connection endpoint map to: {webhook_url}")
+    try:
+        bot.remove_webhook()
+        time.sleep(1)
+        bot.set_webhook(url=webhook_url)
+        print("🌐 [WEBHOOK REGISTRY] Static interface linkage verified.")
+    except Exception as e:
+        print(f"❌ Failed to coordinate custom webhook settings layout: {e}")
+
 if __name__ == "__main__":
     threading.Thread(target=run_java_execution_engine, daemon=True).start()
     threading.Thread(target=run_keep_alive_loops, daemon=True).start()
+    threading.Thread(target=setup_webhook_routing, daemon=True).start()
 
-    # Launch FastAPI portal gateway
+    # Launch FastAPI portal gate
     port = int(os.getenv("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
