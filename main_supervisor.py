@@ -11,13 +11,13 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 
 # Clean and sanitize environment configuration handles explicitly
 RAW_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN")
-# Strip out any accidentally appended whitespace, logs, or trailing timestamps
+# Safely clean out any trailing system runtime characters or appended log text
 TOKEN = RAW_TOKEN.split("2026-")[0].strip()
 
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com")
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").rstrip('/')
 
-# Initialize Telebot instance
+# Initialize Telebot instance using clean string parameters
 bot = telebot.TeleBot(TOKEN, threaded=False)
 app = FastAPI()
 
@@ -28,10 +28,7 @@ def health_check():
 # --- 1. Fixed Telegram Webhook Intake Engine ---
 @app.post("/tg-backend-intake")
 async def telegram_webhook_router(request: Request):
-    """
-    Hyper-stable endpoint route. Fixed path string guarantees zero 
-    character or timestamp string mutation issues.
-    """
+    """ Fixed path routing structures ensure zero character anomalies """
     try:
         json_data = await request.json()
         update = Update.de_json(json_data)
@@ -83,8 +80,11 @@ def send_welcome(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
-    """ Processes button interaction events routed via the static endpoint """
+    """ Main interface execution parameters for processing button events """
     try:
+        # Acknowledge the callback immediately to stop the button loading spinner
+        bot.answer_callback_query(callback_query_id=call.id)
+        
         if call.data == "get_yields":
             print(f"📊 [UI] Dispatching metrics summary box to user ID: {call.from_user.id}")
             bot.send_message(
@@ -94,16 +94,13 @@ def callback_inline(call):
             )
         elif call.data == "add_funds":
             print(f"💳 [UI] Compiling dynamic Paystack link for user ID: {call.from_user.id}")
-            pay_url = f"https://paystack.com{{\\\"telegram_id\\\":{call.from_user.id}}}"
+            pay_url = f"https://paystack.com{{\"telegram_id\":{call.from_user.id}}}"
             bot.send_message(
                 chat_id=call.message.chat.id,
                 text=f"💳 Click below to securely deposit funds via Paystack:\n[Secure Gateway Link]({pay_url})",
                 parse_mode="Markdown",
                 disable_web_page_preview=True
             )
-        
-        # Always resolve the button loading spinner instantly
-        bot.answer_callback_query(callback_query_id=call.id)
     except Exception as e:
         print(f"❌ Error during callback execution processing: {e}")
 
@@ -119,24 +116,23 @@ def run_keep_alive_loops():
     asyncio.run(keep_alive.start_parallel_loops())
 
 def setup_webhook_routing():
-    """ Hooks the static path mapping address into Telegram server files safely """
-    time.sleep(6) # Give the core server frame ample time to complete initialization
-    clean_base_url = RENDER_URL.split("2026-")[0].strip().rstrip('/')
-    webhook_url = f"{clean_base_url}/tg-backend-intake"
-    print(f"🌐 [WEBHOOK REGISTRY] Initializing connection endpoint map to: {webhook_url}")
+    """ Registers the static route mapping with Telegram servers """
+    time.sleep(6) # Give the web gateway framework container full time to boot
+    webhook_url = f"{RENDER_URL}/tg-backend-intake"
+    print(f"🌐 [WEBHOOK REGISTRY] Deploying static link map parameters to: {webhook_url}")
     try:
         bot.remove_webhook()
         time.sleep(1)
         bot.set_webhook(url=webhook_url)
-        print("🌐 [WEBHOOK REGISTRY] Static interface linkage verified.")
+        print("🌐 [WEBHOOK REGISTRY] Webhook pipeline linkage confirmed.")
     except Exception as e:
-        print(f"❌ Failed to coordinate custom webhook settings layout: {e}")
+        print(f"❌ Failed to coordinate custom webhook layout settings: {e}")
 
 if __name__ == "__main__":
     threading.Thread(target=run_java_execution_engine, daemon=True).start()
     threading.Thread(target=run_keep_alive_loops, daemon=True).start()
     threading.Thread(target=setup_webhook_routing, daemon=True).start()
 
-    # Launch FastAPI portal gate
+    # Launch FastAPI core web server portal
     port = int(os.getenv("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
