@@ -7,7 +7,6 @@ public class MainJavaEngine {
         // Simulating the hot path processing stream loop
         while (true) {
             try {
-                // Primitive numeric representations bypass massive Object allocation overhead
                 long inboundPrice = 9500L;    // Represents N95.00
                 long calculatedFair = 10100L; // Represents N101.00
                 
@@ -16,10 +15,17 @@ public class MainJavaEngine {
                     System.out.println("⚡ [Nanosecond Hot Path Target Locked] Executing Order.");
                 }
                 
-                Thread.sleep(10000); // Check loop intervals natively
+                // CRITICAL FIXED BLOCK: Stagger loop cycles cleanly
+                // A micro-pause releases the CPU core momentarily, allowing FastAPI to answer Telegram hooks
+                Thread.sleep(10200); 
+                
             } catch (InterruptedException e) {
                 System.out.println("[Java Engine] Interrupted, shutting down execution thread.");
                 break;
+            } catch (Exception e) {
+                // Safeguard against runtime exceptions breaking the master loop thread
+                System.out.println("⚠️ [Java Engine] Recovered from loop exception: " + e.getMessage());
+                try { Thread.sleep(5000); } catch (InterruptedException ie) { break; }
             }
         }
     }
