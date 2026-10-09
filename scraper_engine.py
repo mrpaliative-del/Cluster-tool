@@ -6,7 +6,7 @@ from playwright.async_api import async_playwright
 import database
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
-ADMIN_TELEGRAM_ID = 8608729377  # Receives all telemetry errors automatically
+ADMIN_TELEGRAM_ID = 8608729377  # Automatically receives alerts if selectors break
 
 alert_bot = telebot.TeleBot(TOKEN, threaded=False)
 
@@ -14,7 +14,7 @@ def dispatch_system_alert(error_message):
     try:
         alert_bot.send_message(
             chat_id=ADMIN_TELEGRAM_ID,
-            text=f"🚨 *[INFRASTRUCTURE ALERT]*\nSystem Engine Failure Detected!\n\n`Error Details:`\n{error_message}",
+            text=f"🚨 *[INFRASTRUCTURE ALERT]*\nPlaywright Engine Failure Detected!\n\n`Error Details:`\n{error_message}",
             parse_mode="Markdown"
         )
     except Exception as ae:
@@ -37,6 +37,7 @@ async def scrape_exchange_orderbook():
         consecutive_failures = 0
         while True:
             try:
+                # Target active market liquidity pool page
                 await page.goto("https://binance.com", timeout=45000, wait_until="domcontentloaded")
                 await asyncio.sleep(5)
                 
@@ -53,14 +54,15 @@ async def scrape_exchange_orderbook():
                 if price_text:
                     clean_price = "".join(c for c in price_text if c.isdigit() or c == '.')
                     market_rate = float(clean_price)
-                    print(f" Mish-Mesh Data Found: ₦{market_rate:,.2f}")
+                    print(f"🎯 [PLAYWRIGHT] Extracted target rate: ₦{market_rate:,.2f}")
                     
-                    # Compute dynamic yield margins relative to baseline valuation metrics (₦9,500)
-                    calculated_yield = round(((market_rate - 9500) / 9500) * 100, 2)
+                    # Calculate dynamic percentage spreads relative to baseline evaluation (₦1,700 base assumption)
+                    calculated_yield = round(((market_rate - 1700) / 1700) * 100, 2)
                     
-                    # Update SQLite dynamic database variables instantly
+                    # STREAM DIRECTLY TO SQLITE: Update ledger data coordinates natively
                     database.update_ledger_yield(calculated_yield)
-                    consecutive_failures = 0  # Clear memory counters on successful iterations
+                    print(f"💾 [PLAYWRIGHT] Database updated with live yield: +{calculated_yield}%")
+                    consecutive_failures = 0  # Reset failure counter on successful data match
                 else:
                     raise ValueError("All interface DOM extraction paths returned blank strings or mismatched objects.")
                     
@@ -69,11 +71,12 @@ async def scrape_exchange_orderbook():
                 error_log = f"[Iteration Failure Count: {consecutive_failures}] Exception mapping web layouts: {str(e)}"
                 print(f"⚠️ {error_log}")
                 
-                # If the crawler encounters 3 consecutive network roadblocks, notify the admin instantly
+                # If the crawler encounters 3 consecutive network blockers, sound the alarm to your phone
                 if consecutive_failures >= 3:
                     dispatch_system_alert(error_log)
                     consecutive_failures = 0  # Throttle alarms to pass network loop limits
                     
+            # Check market rate adjustments on a 3-minute interval matrix
             await asyncio.sleep(180)
         await browser.close()
 
