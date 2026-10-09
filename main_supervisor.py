@@ -7,21 +7,30 @@ import hashlib
 import telebot
 import time
 from fastapi import FastAPI, Request, Response, status
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 
-# Grab credentials from Render environment configs securely
+# Grab configurations securely
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN")
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com")
 
-# Initialize components
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(TOKEN, threaded=False) # Turned off multi-threading to prevent memory conflicts
 app = FastAPI()
 
 @app.get("/")
 def health_check():
     return {"status": "online", "mode": "zero_budget_mesh", "timestamp": time.time()}
 
-# --- 1. Paystack Webhook Handler ---
+# --- 1. Telegram Webhook Receiver Intake Endpoint ---
+@app.post(f"/tg-webhook/{TOKEN}")
+async def telegram_webhook_router(request: Request):
+    """ Processes incoming Telegram updates directly using Render's web traffic port """
+    json_string = await request.json()
+    update = Update.de_json(json_string)
+    bot.process_new_updates([update])
+    return {"status": "ok"}
+
+# --- 2. Paystack Webhook Handler ---
 @app.post("/paystack-webhook")
 async def paystack_webhook(request: Request):
     payload = await request.body()
@@ -42,11 +51,11 @@ async def paystack_webhook(request: Request):
             try:
                 bot.send_message(tg_id, f"✅ *Payment Confirmed!*\nSuccessfully deposited ₦{amount:,.2f} via Paystack into your trading ledger.", parse_mode="Markdown")
             except Exception as e:
-                print(f"⚠️ Failed to send Telegram alert via webhook loop: {e}")
+                print(f"⚠️ Telegram webhook alert error: {e}")
             
     return {"status": "success"}
 
-# --- 2. Telegram Bot Command Matrix ---
+# --- 3. Telegram UI Command Matrix ---
 @bot.message_handler(commands=['start', 'dashboard'])
 def send_welcome(message):
     markup = InlineKeyboardMarkup(row_width=2)
@@ -65,36 +74,9 @@ def callback_inline(call):
         bot.send_message(call.message.chat.id, f"💳 Click [here]({pay_url}) to securely deposit funds via Paystack.", parse_mode="Markdown")
     bot.answer_callback_query(call.id)
 
-# --- 3. Isolated Background Execution Threads ---
-def run_telegram_polling():
-    print("💬 [THREAD] Cleaning stale connection hooks and initiating Telegram Polling...")
-    
-    # CRITICAL FIX: Forces Telegram's servers to break any old ghost connections instantly
-    try:
-        bot.delete_webhook(drop_pending_updates=True)
-        time.sleep(1) # Small 1-second pause to let the server connection reset cleanly
-    except Exception as e:
-        print(f"⚠️ Warning during initial connection flush: {e}")
-
-    while True:
-        try:
-            print("💬 [THREAD] Telegram Interface Polling Engine is running live.")
-            bot.infinity_polling(timeout=20, long_polling_timeout=10)
-        except telebot.apihelper.ApiTelegramException as e:
-            if e.error_code == 409:
-                print("⚠️ [409 Conflict] Detected another active bot container process.")
-                print("⏳ Backing off for 10 seconds to let the old Render instance finish termination...")
-                time.sleep(10) # Safe backoff buffer allowing old instances to shut down cleanly
-            else:
-                print(f"❌ Telegram API error encountered: {e}")
-                time.sleep(5)
-        except Exception as e:
-            print(f"❌ Telegram polling encountered an unhandled exception: {e}")
-            time.sleep(5)
-
+# --- 4. System Subprocess Lifecycles ---
 def run_java_execution_engine():
     print("☕ [THREAD] Launching High-Speed Java Execution Block off-heap...")
-    # Bound Java memory space footprint explicitly to survive under free hosting limits
     subprocess.run(["java", "-Xmx256m", "-jar", "engine.jar"])
 
 def run_keep_alive_loops():
@@ -103,18 +85,19 @@ def run_keep_alive_loops():
     import asyncio
     asyncio.run(keep_alive.start_parallel_loops())
 
-# --- 4. Main Deployment Boot Orchestrator ---
-if __name__ == "__main__":
-    # Launch Java engine asynchronously 
-    threading.Thread(target=run_java_execution_engine, daemon=True).start()
-    
-    # Launch Telegram bot listeners asynchronously 
-    threading.Thread(target=run_telegram_polling, daemon=True).start()
-    
-    # Launch Keep-alive timer loops asynchronously
-    threading.Thread(target=run_keep_alive_loops, daemon=True).start()
+def setup_webhook_routing():
+    """ Registers your live Render URL securely inside Telegram's routing engines """
+    time.sleep(3) # Short buffer allowing the primary web server to initialize completely
+    webhook_url = f"{RENDER_URL}/tg-webhook/{TOKEN}"
+    print(f"🌐 [WEBHOOK] Synchronizing pipeline routing address: {webhook_url}")
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
 
-    # Bind FastAPI to the final primary thread interface required by Render
+if __name__ == "__main__":
+    threading.Thread(target=run_java_execution_engine, daemon=True).start()
+    threading.Thread(target=run_keep_alive_loops, daemon=True).start()
+    threading.Thread(target=setup_webhook_routing, daemon=True).start()
+
+    # Bind directly to Render's exposed environment port allocation
     port = int(os.getenv("PORT", 10000))
-    print(f"⚡ Master Web Gateway binding to deployment server port: {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
