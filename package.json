@@ -1,16 +1,13 @@
 {
-  "name": "micro-task-cluster",
+  "name": "production-revenue-engine",
   "version": "1.0.0",
-  "description": "Autonomous outbound-driven task processing and payment verification engine",
+  "description": "Production-ready revenue engine and webhook verification system",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "build": "npm install && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium"
+    "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "playwright": "^1.40.0",
-    "redis": "^4.6.13"
+    "express": "^4.19.2"
   },
   "engines": {
     "node": ">=18.x"
