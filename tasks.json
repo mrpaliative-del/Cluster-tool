@@ -1,24 +1,4 @@
 {
-  "templates": [
-    {
-      "id": "tpl-01",
-      "template_name": "General Flight & Task Automation",
-      "keyword_trigger": "General",
-      "minimum_payout": 0.40,
-      "is_active": true,
-      "action_schema": {
-        "target_url": "https://cluster-tool.onrender.com/",
-        "steps": []
-      }
-    }
-  ],
-  "tasks": [
-    {
-      "id": "task-001",
-      "sector": "General",
-      "target_asset": "Test Asset",
-      "estimated_value": 0.50,
-      "status": "pending"
-    }
-  ]
+  "templates": [],
+  "tasks": []
 }
