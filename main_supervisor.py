@@ -9,11 +9,12 @@ import time
 from fastapi import FastAPI, Request, Response, status
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 
-# Clean and sanitize environment configuration handles explicitly
+# Clean and verify string configurations cleanly
 RAW_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN").strip()
 
-# Safeguard against string mutation errors
+# Safeguard against string mutation errors safely
 if "2026-" in RAW_TOKEN:
+    # Safely isolate the token if timestamps were appended to the env string
     TOKEN = RAW_TOKEN.split("2026-")[0].strip()
 else:
     TOKEN = RAW_TOKEN
@@ -21,7 +22,7 @@ else:
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").strip().rstrip('/')
 
-# Initialize Telebot object engine natively
+# Initialize Telebot instance natively using raw strings
 bot = telebot.TeleBot(TOKEN, threaded=False)
 app = FastAPI()
 
@@ -29,13 +30,10 @@ app = FastAPI()
 def health_check():
     return {"status": "online", "mode": "production_webhook_mesh", "timestamp": time.time()}
 
-# --- 1. Fixed Telegram Webhook Ingestion Intake Endpoint (Accepts both GET and POST) ---
+# --- 1. Fixed Telegram Webhook Intake Engine (Supports Multi-Method Validation) ---
 @app.api_route("/tg-backend-intake", methods=["GET", "POST"])
 async def telegram_webhook_router(request: Request):
-    """ 
-    CRITICAL FIX: Employs dual-method pattern resolution. 
-    Accepts GET calls from pings and POST calls from chat triggers safely.
-    """
+    """ Handles loopback pings via GET and user actions via POST securely """
     if request.method == "GET":
         return {"status": "active", "info": "Webhook endpoint online"}
         
@@ -69,7 +67,7 @@ async def paystack_webhook(request: Request):
             try:
                 bot.send_message(tg_id, f"✅ *Payment Confirmed!*\nSuccessfully deposited ₦{amount:,.2f} via Paystack into your trading ledger.", parse_mode="Markdown")
             except Exception as e:
-                print(f"⚠️ Paystack Telegram push connection alert dropped: {e}")
+                print(f"⚠️ Paystack Telegram notification error: {e}")
             
     return {"status": "success"}
 
@@ -90,9 +88,9 @@ def send_welcome(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
-    """ Handles interface actions passed down via the FastAPI intake endpoint link """
+    """ Processes user dashboard button interactions """
     try:
-        # Resolve the loading spinner on the button instantly
+        # Acknowledge the callback immediately to stop the button loading spinner
         bot.answer_callback_query(callback_query_id=call.id)
         
         if call.data == "get_yields":
@@ -127,7 +125,7 @@ def run_keep_alive_loops():
 
 def setup_webhook_routing():
     """ Registers the connection routing parameter explicitly with Telegram's servers """
-    time.sleep(6)  # Safe buffer allowing the main framework container to spin up first
+    time.sleep(8)  # Let the FastAPI gateway framework initialize completely first
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
     
     attempts = 0
@@ -142,7 +140,7 @@ def setup_webhook_routing():
                 return
         except telebot.apihelper.ApiTelegramException as e:
             if e.error_code == 429:
-                print("⚠️ [429 Rate Limit] Telegram is busy. Retrying block link in 10 seconds...")
+                print("⚠️ [429 Rate Limit] Telegram is busy. Retrying link configuration in 10 seconds...")
                 time.sleep(10)
             else:
                 print(f"❌ Telegram API exception: {e}")
