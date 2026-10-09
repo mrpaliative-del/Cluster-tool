@@ -6,6 +6,8 @@ import hmac
 import hashlib
 import telebot
 import asyncio
+import shutil
+import time
 from fastapi import FastAPI, Request, Response, status
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 from contextlib import asynccontextmanager
@@ -14,8 +16,6 @@ import database
 # --- 1. Clean Environment Parameters (NON-HARDCODED) ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-
-# Fall back directly to your specific active cluster URL string
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://onrender.com").strip().rstrip('/')
 
 bot = telebot.TeleBot(TOKEN, threaded=False)
@@ -131,16 +131,48 @@ def callback_inline(call):
     except Exception as e:
         print(f"❌ Callback evaluation context fault: {e}")
 
-# --- 5. Clean Background Operations Process ---
+# --- 5. Clean Background Operations & Automated Storage Backups ---
+def run_automated_database_backups():
+    """ Thread Loop: Performs a security snapshot copy of your SQLite file rows on a 24hr grid """
+    BACKUP_DIR = "backups"
+    DB_SRC = "arbitrage_vault.db"
+    
+    print("💾 [BACKUP SYSTEM] Core thread routine initiated.")
+    while True:
+        # Check every 24 hours (86400 seconds)
+        time.sleep(86400)
+        try:
+            if os.path.exists(DB_SRC):
+                if not os.path.exists(BACKUP_DIR):
+                    os.makedirs(BACKUP_DIR)
+                
+                timestamp = time.strftime("%Y%m%d-%H%M%S")
+                backup_filename = f"{BACKUP_DIR}/vault_snapshot_{timestamp}.db"
+                
+                # Perform hot disk copy operation safely
+                shutil.copy2(DB_SRC, backup_filename)
+                print(f"✅ [BACKUP SYSTEM] Database snapshot created successfully: {backup_filename}")
+                
+                # Retention Maintenance Array: Keep only the 7 most recent snapshots to prevent storage bloat
+                all_backups = sorted(
+                    [os.path.join(BACKUP_DIR, f) for f in os.listdir(BACKUP_DIR) if f.endswith('.db')],
+                    key=os.path.getmtime
+                )
+                while len(all_backups) > 7:
+                    old_file = all_backups.pop(0)
+                    os.remove(old_file)
+                    print(f"🗑️ [BACKUP SYSTEM] Recycled expired backup file to preserve space: {old_file}")
+        except Exception as b_error:
+            print(f"⚠️ [BACKUP SYSTEM] Snapshot task iteration encountered jitter: {b_error}")
+
 def run_keep_alive_loops():
     import keep_alive
     asyncio.run(keep_alive.start_parallel_loops())
 
 if __name__ == "__main__":
-    # Launch standard application monitoring keep-alive ping threads safely
+    # Launch monitoring loops and backup threads concurrently
     threading.Thread(target=run_keep_alive_loops, daemon=True).start()
+    threading.Thread(target=run_automated_database_backups, daemon=True).start()
 
-    # Processes are now fully stripped from code. Execution is managed natively 
-    # as independent OS processes via supervisor.conf
     port = int(os.getenv("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
