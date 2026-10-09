@@ -9,12 +9,12 @@ import time
 from fastapi import FastAPI, Request, Response, status
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 
-# Read the environment variables exactly as strings
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN").strip()
+# Read the environment tokens exactly as clean string variables
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").strip().rstrip('/')
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://onrender.com").strip().rstrip('/')
 
-# Initialize Telebot with raw string token without threaded handlers
+# Initialize Telebot using clean native single-threaded execution parameters
 bot = telebot.TeleBot(TOKEN, threaded=False)
 app = FastAPI()
 
@@ -22,10 +22,10 @@ app = FastAPI()
 def health_check():
     return {"status": "online", "mode": "production_webhook_mesh", "timestamp": time.time()}
 
-# --- 1. Telegram Webhook Intrack Receiver Endpoint ---
+# --- 1. Combined Telegram Webhook Intake Engine (Accepts GET and POST) ---
 @app.api_route("/tg-backend-intake", methods=["GET", "POST"])
 async def telegram_webhook_router(request: Request):
-    """ Fixed static route removes dynamic string mutation issues completely """
+    """ Handles engine health pings via GET and user interactions via POST """
     if request.method == "GET":
         return {"status": "active", "info": "Webhook endpoint online"}
         
@@ -59,7 +59,7 @@ async def paystack_webhook(request: Request):
             try:
                 bot.send_message(tg_id, f"✅ *Payment Confirmed!*\nSuccessfully deposited ₦{amount:,.2f} via Paystack into your trading ledger.", parse_mode="Markdown")
             except Exception as e:
-                print(f"⚠️ Paystack Telegram push connection alert dropped: {e}")
+                print(f"⚠️ Paystack Telegram notification error: {e}")
             
     return {"status": "success"}
 
@@ -80,9 +80,9 @@ def send_welcome(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
-    """ Handles interface actions passed down via the FastAPI intake endpoint link """
+    """ Main interface parameter logic for processing button interface callback events """
     try:
-        # Resolve the loading spinner on the button instantly
+        # Acknowledge the callback immediately to stop the button loading spinner animation
         bot.answer_callback_query(callback_query_id=call.id)
         
         # Safely capture the exact conversational chat identity window object safely
@@ -119,8 +119,8 @@ def run_keep_alive_loops():
     asyncio.run(keep_alive.start_parallel_loops())
 
 def setup_webhook_routing():
-    """ Registers the connection routing parameter explicitly with Telegram's data node servers """
-    time.sleep(12)  # Expanded buffer to let Uvicorn and Render fully swap containers first
+    """ Registers the connection routing parameters explicitly with Telegram's data node servers """
+    time.sleep(8)  # Let the FastAPI web gateway framework load up completely first
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
     
     attempts = 0
