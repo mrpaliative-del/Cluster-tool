@@ -26,6 +26,9 @@ WORKDIR /app
 
 # Copy Python requirements and install dependencies
 COPY requirements.txt ./
+
+# CRITICAL FIX: Upgrade pip first to give it the modern package resolver matrix
+RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install --with-deps chromium
 
@@ -35,8 +38,8 @@ COPY . .
 # Copy built jar from the java-builder stage
 COPY --from=java-builder /build/target/*.jar ./engine.jar
 
-# Expose ports if needed
-EXPOSE 8000
+# Fixed to match Uvicorn port 10000 settings in main_supervisor.py
+EXPOSE 10000
 
 # Start command for supervisor
 CMD ["python", "main_supervisor.py"]
