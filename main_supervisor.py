@@ -12,7 +12,7 @@ import database
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").strip().rstrip('/')
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://onrender.com").strip().rstrip('/')
 
 BROKER_API_URL = os.getenv("BROKER_API_URL", "https://yourbroker.com")
 BROKER_TOKEN = os.getenv("BROKER_API_TOKEN", "mock_secure_token_xxxx")
@@ -153,27 +153,21 @@ def callback_inline(call):
             bot.send_message(chat_id=target_chat_id, text=dashboard_text, parse_mode="Markdown")
             
         elif call.data == "add_funds":
-            # Segmented list grouping prevents copy-paste clip drops on mobile screens
-            url_components = [
-                "https://paystack.shop",
-                "pay/",
-                "arbitrage-vault-deposit",
-                "?metadata=%7B%22telegram_id%22%3A",
-                str(call.from_user.id),
-                "%7D"
-            ]
-            pay_url = "".join(url_components)
+            user_id_string = str(call.from_user.id)
+            pay_url = f"https://paystack.shop{user_id_string}%7D"
             
+            # Using clean HTML tagging prevents parsing or character drop failures
             text_reply = (
-                "💳 *Paystack Secure Gateway Ready*\n\n"
+                "💳 <b>Paystack Secure Gateway Ready</b>\n\n"
                 "Tap your payment page link below to load your checkout dashboard securely via Mpee global ventures:\n\n"
-                + pay_url
+                f'<a href="{pay_url}">{pay_url}</a>'
             )
             
             bot.send_message(
                 chat_id=target_chat_id,
                 text=text_reply,
-                parse_mode="Markdown"
+                parse_mode="HTML",
+                disable_web_page_preview=True
             )
     except Exception as e:
         bot.send_message(
