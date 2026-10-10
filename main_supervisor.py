@@ -1,13 +1,9 @@
-import subprocess
-import threading
 import os
 import uvicorn
 import hmac
 import hashlib
 import telebot
 import asyncio
-import shutil
-import time
 import requests
 from fastapi import FastAPI, Request, Response, status
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
@@ -27,16 +23,16 @@ bot = telebot.TeleBot(TOKEN, threaded=False)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     database.init_db()
-    await asyncio.sleep(4)
+    await asyncio.sleep(2)
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
-    print(f"🌐 [LIFESPAN] Mapping webhook configurations pipeline to: {webhook_url}")
+    print(f"🌐 Linking Webhook Pipeline to: {webhook_url}")
     try:
         bot.remove_webhook()
         await asyncio.sleep(1)
         bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"])
-        print("🌐 [LIFESPAN SUCCESS] Webhook pipeline linkage confirmed and active!")
+        print("🌐 Webhook linkage active!")
     except Exception as e:
-        print(f"❌ [LIFESPAN FAULT] Webhook initialization failed: {e}")
+        print(f"❌ Webhook initialization failed: {e}")
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -57,8 +53,6 @@ def get_portfolio_status():
 async def tradingview_alert_receiver(request: Request):
     try:
         payload = await request.json()
-        print(f"🚀 [TRADINGVIEW ALERT RECEIVED] Payload: {payload}")
-        
         action = payload.get("action")
         ticker = payload.get("ticker")
         price = payload.get("close_price")
@@ -67,11 +61,10 @@ async def tradingview_alert_receiver(request: Request):
         fx_capital = balances.get("FOREX_RESERVE", 0.0)
         
         if fx_capital <= 0:
-            print("🔒 [EXECUTION HALTED] Forex Reserve balance is ₦0.00.")
             return {"status": "ignored", "reason": "zero_capital"}
             
         if BROKER_TOKEN == "mock_secure_token_xxxx":
-            print(f"🔬 [SANDBOX ORDER] Simulated {action} entry for {ticker} at {price}.")
+            print(f"🔬 Simulated {action} entry for {ticker} at {price}.")
         else:
             broker_payload = {
                 "instrument": ticker, 
@@ -82,12 +75,11 @@ async def tradingview_alert_receiver(request: Request):
             
         bot.send_message(
             chat_id=8608729377,
-            text=f"📡 *TradingView Strategy Alert Executed!*\nAction: `{action}`\nAsset: `{ticker}`\nExecution Price: `{price}`\nVault Status: `Active Running`",
+            text=f"📡 *Alert Executed!*\nAction: `{action}`\nAsset: `{ticker}`\nPrice: `{price}`",
             parse_mode="Markdown"
         )
         return {"status": "executed"}
     except Exception as e:
-        print(f"❌ [TRADINGVIEW GATEWAY FAULT] Processing anomaly: {e}")
         return Response(content=str(e), status_code=400)
 
 @app.post("/tg-backend-intake")
@@ -122,11 +114,11 @@ async def paystack_webhook(request: Request):
             try:
                 bot.send_message(
                     chat_id=tg_id, 
-                    text=f"✅ *Payment Confirmed!*\nSuccessfully deposited *₦{amount:,.2f}* via Paystack directly into your active Crypto Arbitrage balance ledger.", 
+                    text=f"✅ *Payment Confirmed!*\nSuccessfully deposited *₦{amount:,.2f}*.", 
                     parse_mode="Markdown"
                 )
             except Exception as e:
-                print(f"⚠️ Telegram confirmation alert runtime warning: {e}")
+                print(f"⚠️ Telegram alert error: {e}")
             
     return {"status": "success"}
 
@@ -139,7 +131,7 @@ def send_welcome(message):
     )
     bot.send_message(
         chat_id=message.chat.id,
-        text="🤖 *Holding Firm 7-Asset Master Engine Active.*\nSelect a monitoring hub parameter below to analyze your live quantitative allocations:",
+        text="🤖 *Holding Master Engine Active.*\nSelect a monitoring hub parameter:",
         reply_markup=markup,
         parse_mode="Markdown"
     )
@@ -152,7 +144,6 @@ def callback_inline(call):
         
         if call.data == "get_yields":
             balances = database.get_ledger_metrics()
-            
             dashboard_text = (
                 "📈 *Unified 7-Asset Holding Dashboard*\n\n"
                 f"💳 *Personal Upkeep (20%):* `₦{balances.get('PERSONAL_UPKEEP', 0.0):,.2f}`\n"
@@ -161,8 +152,7 @@ def callback_inline(call):
                 f"📈 *Stocks & Equities (15%):* `₦{balances.get('STOCKS_EQUITIES', 0.0):,.2f}`\n"
                 f"✨ *Commodities & Gold (10%):* `₦{balances.get('COMMODITIES_GOLD', 0.0):,.2f}`\n"
                 f"📊 *Alternative Markets (10%):* `₦{balances.get('ALT_MARKETS', 0.0):,.2f}`\n"
-                f"⚽ *Sports Betting Vault (5%):* `₦{balances.get('SPORTS_BETTING', 0.0):,.2f}`\n\n"
-                "🔒 *Status:* 7-Asset Portfolio Matrix Lock active. All background processes running."
+                f"⚽ *Sports Betting Vault (5%):* `₦{balances.get('SPORTS_BETTING', 0.0):,.2f}`"
             )
             bot.send_message(chat_id=target_chat_id, text=dashboard_text, parse_mode="Markdown")
             
@@ -175,17 +165,14 @@ def callback_inline(call):
                 disable_web_page_preview=True
             )
     except Exception as e:
-        print(f"❌ Callback evaluation context fault: {e}")
+        print(f"❌ Callback context fault: {e}")
 
 @bot.message_handler(commands=['tune'])
 def adjust_investment_profile(message):
     guide_text = (
-        "⚙️ *15-Tool Capital Tuning Matrix Console*\n\n"
-        "To modify your automated percentage splits over the network, send a text line matching this exact syntax format:\n\n"
-        "`set_split: 0.10, 0.30, 0.20, 0.10, 0.10, 0.15, 0.05`\n\n"
-        "📊 *Order Sequence Layout Guideline:*\n"
-        "1. Personal Upkeep\n2. Crypto Core\n3. Forex Vault\n4. Stocks\n5. Gold\n6. Alternatives\n7. Sports Betting\n\n"
-        "⚠️ *Operational Rule:* The sum of all seven fractions *must equal exactly 1.00* (100%) to maintain transaction ledger integrity."
+        "⚙️ *15-Tool Tuning Console*\n\n"
+        "Send a line matching this exact format to update splits:\n\n"
+        "`set_split: 0.10, 0.30, 0.20, 0.10, 0.10, 0.15, 0.05`"
     )
     bot.send_message(chat_id=message.chat.id, text=guide_text, parse_mode="Markdown")
 
@@ -196,12 +183,12 @@ def process_tuning_input(message):
         parts = [float(x.strip()) for x in raw_data.split(",")]
         
         if len(parts) != 7:
-            bot.reply_to(message, "❌ *Configuration Fault:* You must pass exactly 7 parameter values.")
+            bot.reply_to(message, "❌ *Configuration Fault:* Pass exactly 7 parameter values.")
             return
 
         total_sum = sum(parts)
         if abs(total_sum - 1.0) > 1e-4:
-            bot.reply_to(message, f"❌ *Validation Fault:* Sum total equals `{total_sum}`. It must equal exactly `1.0` (100%).")
+            bot.reply_to(message, f"❌ *Validation Fault:* Sum total must equal exactly 1.0.")
             return
 
         new_matrix = {
@@ -216,18 +203,13 @@ def process_tuning_input(message):
         
         success = database.update_tuning_matrix(new_matrix)
         if success:
-            bot.reply_to(message, "🚀 *System Hotfix Active!* 15-Tool allocation splits updated successfully across all networks.")
+            bot.reply_to(message, "🚀 *Allocation splits updated successfully!*")
             return
             
-        bot.reply_to(message, "❌ Core write-lock disk initialization timeout error occurred.")
+        bot.reply_to(message, "❌ Core database write-lock timeout error.")
     except Exception as error:
         bot.reply_to(message, f"❌ *Parsing Abnormality:* Error: {error}")
 
-def run_automated_database_backups():
-    """ Flat Background Routine: Securely handles snapshots with clean formatting """
-    print("💾 [BACKUP SYSTEM] Core thread routine initiated.")
-    while True:
-        time.sleep(86400)
-        try:
-            if os.path.exists("arbitrage_vault.db"):
-                if not os.path.exists("backups"):
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
