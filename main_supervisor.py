@@ -205,13 +205,13 @@ def process_tuning_input(message):
             return
 
         new_matrix = {
-            "PERSONAL_UPKEEP": parts[0],
-            "CRYPTO_ARBITRAGE": parts[1],
-            "FOREX_RESERVE": parts[2],
-            "STOCKS_EQUITIES": parts[3],
-            "COMMODITIES_GOLD": parts[4],
-            "ALT_MARKETS": parts[5],
-            "SPORTS_BETTING": parts[6]
+            "PERSONAL_UPKEEP": parts,
+            "CRYPTO_ARBITRAGE": parts,
+            "FOREX_RESERVE": parts,
+            "STOCKS_EQUITIES": parts,
+            "COMMODITIES_GOLD": parts,
+            "ALT_MARKETS": parts,
+            "SPORTS_BETTING": parts
         }
         
         success = database.update_tuning_matrix(new_matrix)
@@ -224,12 +224,10 @@ def process_tuning_input(message):
         bot.reply_to(message, f"❌ *Parsing Abnormality:* Error: {error}")
 
 def run_automated_database_backups():
-    BACKUP_DIR = "backups"
-    DB_SRC = "arbitrage_vault.db"
+    """ Flat Background Routine: Securely handles snapshots with clean formatting """
     print("💾 [BACKUP SYSTEM] Core thread routine initiated.")
     while True:
         time.sleep(86400)
         try:
-            if os.path.exists(DB_SRC):
-                if not os.path.exists(BACKUP_DIR):
-                    os.makedirs(BACKUP_DIR)
+            if os.path.exists("arbitrage_vault.db"):
+                if not os.path.exists("backups"):
