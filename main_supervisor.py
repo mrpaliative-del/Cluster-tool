@@ -5,6 +5,7 @@ import hashlib
 import telebot
 import asyncio
 import requests
+import urllib.parse
 from fastapi import FastAPI, Request, Response, status
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 from contextlib import asynccontextmanager
@@ -154,7 +155,10 @@ def callback_inline(call):
             
         elif call.data == "add_funds":
             user_string = str(call.from_user.id)
-            pay_url = f"https://paystack.shop{user_string}%7D"
+            raw_metadata = '{"telegram_id":' + user_string + '}'
+            encoded_metadata = urllib.parse.quote(raw_metadata)
+            
+            pay_url = f"https://paystack.shop{encoded_metadata}"
             
             inline_gate = InlineKeyboardMarkup()
             inline_gate.add(
