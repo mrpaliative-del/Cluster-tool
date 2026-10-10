@@ -156,17 +156,10 @@ def callback_inline(call):
         elif call.data == "add_funds":
             user_string = str(call.from_user.id)
             
-            # Segmenting the string guarantees absolute copy-paste structural layout preservation
-            link_segments = [
-                "https://paystack.shop",
-                "?metadata=",
-                "%7B%22telegram_id%22%3A",
-                user_string,
-                "%7D"
-            ]
-            pay_url = "".join(link_segments)
+            # Declaring the absolute path in a single f-string to prevent truncation
+            pay_url = f"https://paystack.shop{user_string}%7D"
             
-            # Delivers pure text hyperlinks backed with raw copyable string arrays
+            # Formulating HTML layout text response cards
             text_reply = (
                 "💳 <b>Paystack Secure Gateway Ready</b>\n\n"
                 "Tap your payment link below to securely fund your automated matrix via Mpee global ventures:\n\n"
