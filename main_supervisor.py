@@ -158,7 +158,8 @@ def callback_inline(call):
             raw_metadata = '{"telegram_id":' + user_string + '}'
             encoded_metadata = urllib.parse.quote(raw_metadata)
             
-            pay_url = f"https://paystack.shop{encoded_metadata}"
+            # Switched domain layer to official Paystack link format
+            pay_url = f"https://pay.stack{encoded_metadata}"
             
             inline_gate = InlineKeyboardMarkup()
             inline_gate.add(
