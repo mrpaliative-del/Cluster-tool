@@ -145,7 +145,7 @@ async def operations_web_dashboard():
                     <div class="matrix-list" style="margin-top: 12px;">
                         <div class="matrix-item"><span>Database Node</span><span style="color: #10b981; font-weight: bold;">{infra.get('database_health')}</span></div>
                         <div class="matrix-item"><span>Paystack Profile Sync</span><span style="color: #38bdf8; font-weight: bold;">{infra.get('storage_sync_state')}</span></div>
-                        <div class="matrix-item"><span>TV Alerts Executed</span><strong>{ALERT_COUNTER}</strong></div>
+                        <div class="matrix-item"><span>TV Alerts Executed</span>...<strong>{ALERT_COUNTER}</strong></div>
                         <div class="matrix-item"><span>Last Signal Frame</span><span style="font-family: monospace; font-size: 12px;">{LAST_ALERT_TIME}</span></div>
                     </div>
                 </div>
@@ -189,9 +189,7 @@ async def tradingview_alert_receiver(request: Request):
             print(f"🔬 Simulated {action} entry for {ticker} at {price}.")
         else:
             if "Long" in str(action):
-                calculated_units = LOT_SIZE * 100000
+                calc_units = LOT_SIZE * 100000
             else:
-                calculated_units = -(LOT_SIZE * 100000)
-                
-            broker_payload = {
-                "instrument": ticker, 
+                calc_units = -(LOT_SIZE * 100000)
+            broker_payload = {"instrument": ticker, "units": calc_units, "type": "MARKET"}
