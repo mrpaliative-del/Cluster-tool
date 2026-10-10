@@ -8,6 +8,7 @@ import telebot
 import asyncio
 import shutil
 import time
+import requests
 from fastapi import FastAPI, Request, Response, status
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 from contextlib import asynccontextmanager
@@ -16,7 +17,12 @@ import database
 # --- 1. Clean Environment Parameters (NON-HARDCODED) ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").strip().rstrip('/')
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://onrender.com").strip().rstrip('/')
+
+# External Broker Gateway Configs for TradingView Executions
+BROKER_API_URL = os.getenv("BROKER_API_URL", "https://yourbroker.com")
+BROKER_TOKEN = os.getenv("BROKER_API_TOKEN", "mock_secure_token_xxxx")
+LOT_SIZE = 0.1
 
 bot = telebot.TeleBot(TOKEN, threaded=False)
 
@@ -40,13 +46,59 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # --- 3. Gateway Routing Array ---
-@app.get("/")
-def home_mesh_root(): 
+@app.route("/", methods=["GET", "HEAD"])
+def home_mesh_root(request: Request = None): 
+    """ PRODUCTION FIX: Handles both GET requests and automated infrastructure HEAD checks cleanly """
     return {"status": "online"}
 
 @app.get("/health")
 def engine_health_check(): 
     return {"status": "ok"}
+
+@app.get("/portfolio-status")
+def get_portfolio_status():
+    """ Exposes live balance ledger array to external Node.js engines """
+    return database.get_ledger_metrics()
+
+# --- 4. TRADINGVIEW WEBHOOK RECEIVER GATEWAY ---
+@app.post("/tradingview-alert")
+async def tradingview_alert_receiver(request: Request):
+    """ Captures and processes execution payloads directly from your TradingView strategy script """
+    try:
+        payload = await request.json()
+        print(f"🚀 [TRADINGVIEW ALERT RECEIVED] Payload: {payload}")
+        
+        action = payload.get("action")       # 'Cascade Long' or 'Cascade Short'
+        ticker = payload.get("ticker")       # e.g., 'EURUSD'
+        price = payload.get("close_price")   # Execution price index
+        
+        balances = database.get_ledger_metrics()
+        fx_capital = balances.get("FOREX_RESERVE", 0.0)
+        
+        if fx_capital <= 0:
+            print("🔒 [EXECUTION HALTED] Forex Reserve balance is ₦0.00. Standing by for task engine allocations.")
+            return {"status": "ignored", "reason": "zero_capital"}
+            
+        if BROKER_TOKEN == "mock_secure_token_xxxx":
+            print(f"🔬 [SANDBOX ORDER] Signal matches criteria. Simulated {action} entry for {ticker} at {price}.")
+        else:
+            broker_payload = {
+                "instrument": ticker, 
+                "units": LOT_SIZE * 100000 if "Long" in action else -LOT_SIZE * 100000, 
+                "type": "MARKET"
+            }
+            requests.post(BROKER_API_URL, json=broker_payload, headers={"Authorization": f"Bearer {BROKER_TOKEN}"}, timeout=10)
+            
+        # Pushes an instantaneous trading update straight to your personal device
+        bot.send_message(
+            chat_id=8608729377,
+            text=f"📡 *TradingView Strategy Alert Executed!*\nAction: `{action}`\nAsset: `{ticker}`\nExecution Price: `{price}`\nVault Status: `Active Running`",
+            parse_mode="Markdown"
+        )
+        return {"status": "executed"}
+    except Exception as e:
+        print(f"❌ [TRADINGVIEW GATEWAY FAULT] Processing anomaly: {e}")
+        return Response(content=str(e), status_code=400)
 
 @app.post("/tg-backend-intake")
 async def telegram_webhook_router(request: Request):
@@ -76,14 +128,12 @@ async def paystack_webhook(request: Request):
         amount = data["data"]["amount"] / 100
         trx_ref = data["data"]["reference"]
         
-        # Credit user balances inside SQLite atomically
         is_new = database.record_deposit(trx_ref, tg_id, amount)
-        
         if is_new and tg_id:
             try:
                 bot.send_message(
                     chat_id=tg_id, 
-                    text=f"✅ *Payment Confirmed!*\nSuccessfully deposited *₦{amount:,.2f}* via Paystack directly into your active trading balance ledger.", 
+                    text=f"✅ *Payment Confirmed!*\nSuccessfully deposited *₦{amount:,.2f}* via Paystack directly into your active Crypto Arbitrage balance ledger.", 
                     parse_mode="Markdown"
                 )
             except Exception as e:
@@ -91,7 +141,7 @@ async def paystack_webhook(request: Request):
             
     return {"status": "success"}
 
-# --- 4. Telegram UI Control Panel Matrix ---
+# --- 5. Telegram UI Control Panel Matrix ---
 @bot.message_handler(commands=['start', 'dashboard'])
 def send_welcome(message):
     markup = InlineKeyboardMarkup(row_width=2)
@@ -113,7 +163,6 @@ def callback_inline(call):
         target_chat_id = call.message.chat.id
         
         if call.data == "get_yields":
-            # PRODUCTION FIX: Safely extract dictionary values from your updated 7-Asset relational database index
             balances = database.get_ledger_metrics()
             
             dashboard_text = (
@@ -140,44 +189,28 @@ def callback_inline(call):
     except Exception as e:
         print(f"❌ Callback evaluation context fault: {e}")
 
-# --- 5. Clean Background Operations & Automated Storage Backups ---
-def run_automated_database_backups():
-    """ Thread Loop: Performs a security snapshot copy of your SQLite file rows on a 24hr grid """
-    BACKUP_DIR = "backups"
-    DB_SRC = "arbitrage_vault.db"
-    
-    print("💾 [BACKUP SYSTEM] Core thread routine initiated.")
-    while True:
-        time.sleep(86400)
-        try:
-            if os.path.exists(DB_SRC):
-                if not os.path.exists(BACKUP_DIR):
-                    os.makedirs(BACKUP_DIR)
-                
-                timestamp = time.strftime("%Y%m%d-%H%M%S")
-                backup_filename = f"{BACKUP_DIR}/vault_snapshot_{timestamp}.db"
-                
-                shutil.copy2(DB_SRC, backup_filename)
-                print(f"✅ [BACKUP SYSTEM] Database snapshot created successfully: {backup_filename}")
-                
-                all_backups = sorted(
-                    [os.path.join(BACKUP_DIR, f) for f in os.listdir(BACKUP_DIR) if f.endswith('.db')],
-                    key=os.path.getmtime
-                )
-                while len(all_backups) > 7:
-                    old_file = all_backups.pop(0)
-                    os.remove(old_file)
-                    print(f"🗑️ [BACKUP SYSTEM] Recycled expired backup file to preserve space: {old_file}")
-        except Exception as b_error:
-            print(f"⚠️ [BACKUP SYSTEM] Snapshot task iteration encountered jitter: {b_error}")
+# --- 6. MODULE 11: DYNAMIC NETWORK /TUNE CONSOLE RECEIVER ---
+@bot.message_handler(commands=['tune'])
+def adjust_investment_profile(message):
+    """ Guides the user on how to adjust portfolio allocation splits from their phone screen """
+    guide_text = (
+        "⚙️ *15-Tool Capital Tuning Matrix Console*\n\n"
+        "To modify your automated percentage splits over the network, send a text line matching this exact syntax format:\n\n"
+        "`set_split: 0.10, 0.30, 0.20, 0.10, 0.10, 0.15, 0.05`\n\n"
+        "📊 *Order Sequence Layout Guideline:*\n"
+        "1. Personal Upkeep\n2. Crypto Core\n3. Forex Vault\n4. Stocks\n5. Gold\n6. Alternatives\n7. Sports Betting\n\n"
+        "⚠️ *Operational Rule:* The sum of all seven fractions *must equal exactly 1.00* (100%) to maintain transaction ledger integrity."
+    )
+    bot.send_message(chat_id=message.chat.id, text=guide_text, parse_mode="Markdown")
 
-def run_keep_alive_loops():
-    import keep_alive
-    asyncio.run(keep_alive.start_parallel_loops())
-
-if __name__ == "__main__":
-    threading.Thread(target=run_keep_alive_loops, daemon=True).start()
-    threading.Thread(target=run_automated_database_backups, daemon=True).start()
-
-    port = int(os.getenv("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+@bot.message_handler(func=lambda msg: msg.text and msg.text.startswith("set_split:"))
+def process_tuning_input(message):
+    try:
+        raw_data = message.text.replace("set_split:", "").strip()
+        parts = [float(x.strip()) for x in raw_data.split(",")]
+        
+        if len(parts) != 7:
+            bot.reply_to(message, "❌ *Configuration Fault:* You must pass exactly 7 matrix parameter values.")
+            return
+            
+        if abs(sum(parts) - 1.0) > 1e-4:
