@@ -176,6 +176,7 @@ def get_comprehensive_performance_metrics():
         # 2. Extract Processing Volume Totals from Historical Deposits
         cursor.execute("SELECT COUNT(*), SUM(amount) FROM deposits")
         deposit_stats = cursor.fetchone()
+        
         total_deposit_count = deposit_stats[0] if deposit_stats and deposit_stats[0] else 0
         total_volume_processed = deposit_stats[1] if deposit_stats and deposit_stats[1] else 0.0
 
