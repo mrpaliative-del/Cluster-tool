@@ -39,17 +39,16 @@ def sync_paystack_settlement_profile():
             account_no = biz_data.get("settlement_account_number", "—")
             account_name = biz_data.get("settlement_account_name", "Mpee global ventures")
             database.update_settlement_account(bank_name, account_no, account_name)
-            print(f"💾 Settlement profile updated dynamically: {bank_name} ({account_no})")
+            print(f"💾 Dynamic account layout update succeeded: {bank_name} ({account_no})")
     except Exception as e:
         print(f"⚠️ Automated bank settlement profile sync error: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 💾 Keep core database seeding on the main path
+    # Seed core data sets
     database.init_db()
     
-    # ⚡ Run the synchronous Paystack API request in a background thread
-    # This prevents the network call from blocking Render's health check handshakes
+    # Process webhook integration metrics concurrently in background executor
     loop = asyncio.get_event_loop()
     asyncio.ensure_future(loop.run_in_executor(None, sync_paystack_settlement_profile))
     
@@ -57,7 +56,6 @@ async def lifespan(app: FastAPI):
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
     print(f"🌐 Linking Webhook Pipeline to: {webhook_url}")
     
-    # Resilient Retry Engine to bypass Telegram 429 Rate Limits
     for attempt in range(1, 6):
         try:
             bot.remove_webhook()
@@ -74,10 +72,7 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/", response_class=HTMLResponse)
 async def operations_web_dashboard(): 
-    """
-    Compiles and renders a beautiful, accessible real-time web operational dashboard
-    displaying systemic performance metrics and transaction velocities.
-    """
+    """Renders a comprehensive web metrics dashboard for system verification."""
     perf = database.get_comprehensive_performance_metrics()
     summary = perf.get("financial_summary", {})
     matrix = perf.get("portfolio_matrix_breakdown", {})
@@ -171,7 +166,6 @@ def engine_health_check():
 
 @app.get("/portfolio-status")
 def get_portfolio_status():
-    """Exposes structured metric trees for external tooling intakes."""
     return database.get_comprehensive_performance_metrics()
 
 @app.post("/tradingview-alert")
@@ -191,5 +185,11 @@ async def tradingview_alert_receiver(request: Request):
         if fx_capital <= 0:
             return {"status": "ignored", "reason": "zero_capital"}
             
-        if BROKER_TOKEN != "mock_secure_token_xxxx":
+        if BROKER_TOKEN == "mock_secure_token_xxxx":
+            print(f"🔬 Simulated {action} entry for {ticker} at {price}.")
+        else:
             broker_payload = {
+                "instrument": ticker, 
+                "units": (LOT_SIZE * 100000) if "Long" in action else -(LOT_SIZE * 100000), 
+                "type": "MARKET"
+            }
