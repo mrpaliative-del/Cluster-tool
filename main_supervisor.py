@@ -13,7 +13,7 @@ import database
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").strip().rstrip('/')
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://onrender.com").strip().rstrip('/')
 
 BROKER_API_URL = os.getenv("BROKER_API_URL", "https://yourbroker.com")
 BROKER_TOKEN = os.getenv("BROKER_API_TOKEN", "mock_secure_token_xxxx")
@@ -166,8 +166,10 @@ def callback_inline(call):
         elif call.data == "add_funds":
             user_string = str(call.from_user.id)
             
-            # Absolute, unfragmented payment link blueprint
-            pay_url = f"https://paystack.shop{user_string}%7D"
+            # Isolated components ensure no character fragmentation can occur at runtime
+            base_endpoint = "https://paystack.shop"
+            tracking_payload = f"?metadata=%7B%22telegram_id%22%3A{user_string}%7D"
+            pay_url = f"{base_endpoint}{tracking_payload}"
             
             text_reply = (
                 "💳 <b>Paystack Secure Gateway Ready</b>\n\n"
