@@ -39,16 +39,25 @@ def sync_paystack_settlement_profile():
             account_no = biz_data.get("settlement_account_number", "—")
             account_name = biz_data.get("settlement_account_name", "Mpee global ventures")
             database.update_settlement_account(bank_name, account_no, account_name)
+            print(f"💾 Settlement profile updated dynamically: {bank_name} ({account_no})")
     except Exception as e:
         print(f"⚠️ Automated bank settlement profile sync error: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 💾 Keep core database seeding on the main path
     database.init_db()
-    sync_paystack_settlement_profile()
+    
+    # ⚡ Run the synchronous Paystack API request in a background thread
+    # This prevents the network call from blocking Render's health check handshakes
+    loop = asyncio.get_event_loop()
+    asyncio.ensure_future(loop.run_in_executor(None, sync_paystack_settlement_profile))
+    
     await asyncio.sleep(2)
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
+    print(f"🌐 Linking Webhook Pipeline to: {webhook_url}")
     
+    # Resilient Retry Engine to bypass Telegram 429 Rate Limits
     for attempt in range(1, 6):
         try:
             bot.remove_webhook()
@@ -57,7 +66,8 @@ async def lifespan(app: FastAPI):
             print("🌐 Webhook linkage active and running!")
             break
         except Exception as e:
-            await asyncio.sleep(attempt * 2)
+            print(f"⚠️ Webhook linkage attempt {attempt}/5 failed: {e}")
+            await asyncio.sleep(attempt * 3)
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -183,18 +193,3 @@ async def tradingview_alert_receiver(request: Request):
             
         if BROKER_TOKEN != "mock_secure_token_xxxx":
             broker_payload = {
-                "instrument": ticker, 
-                "units": LOT_SIZE * 100000 if "Long" in action else -LOT_SIZE * 100000, 
-                "type": "MARKET"
-            }
-            requests.post(BROKER_API_URL, json=broker_payload, headers={"Authorization": f"Bearer {BROKER_TOKEN}"}, timeout=10)
-            
-        bot.send_message(
-            chat_id=8608729377,
-            text=f"📡 *Alert Executed!*\nAction: `{action}`\nAsset: `{ticker}`\nPrice: `{price}`",
-            parse_mode="Markdown"
-        )
-        return {"status": "executed"}
-    except Exception as e:
-        return Response(content=str(e), status_code=400)
-
