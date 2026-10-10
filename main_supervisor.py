@@ -14,23 +14,19 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 from contextlib import asynccontextmanager
 import database
 
-# --- 1. Clean Environment Parameters (NON-HARDCODED) ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://onrender.com").strip().rstrip('/')
 
-# External Broker Gateway Configs for TradingView Executions
 BROKER_API_URL = os.getenv("BROKER_API_URL", "https://yourbroker.com")
 BROKER_TOKEN = os.getenv("BROKER_API_TOKEN", "mock_secure_token_xxxx")
 LOT_SIZE = 0.1
 
 bot = telebot.TeleBot(TOKEN, threaded=False)
 
-# --- 2. Safe Sequential Lifespan Manager ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """ Executes database schema initialization and links Telegram webhooks cleanly """
-    database.init_db()  # Initialize thread-safe SQLite database schemas natively
+    database.init_db()
     await asyncio.sleep(4)
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
     print(f"🌐 [LIFESPAN] Mapping webhook configurations pipeline to: {webhook_url}")
@@ -45,10 +41,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# --- 3. Gateway Routing Array ---
 @app.route("/", methods=["GET", "HEAD"])
 def home_mesh_root(request: Request = None): 
-    """ PRODUCTION FIX: Handles both GET requests and automated infrastructure HEAD checks cleanly """
     return {"status": "online"}
 
 @app.get("/health")
@@ -57,30 +51,27 @@ def engine_health_check():
 
 @app.get("/portfolio-status")
 def get_portfolio_status():
-    """ Exposes live balance ledger array to external Node.js engines """
     return database.get_ledger_metrics()
 
-# --- 4. TRADINGVIEW WEBHOOK RECEIVER GATEWAY ---
 @app.post("/tradingview-alert")
 async def tradingview_alert_receiver(request: Request):
-    """ Captures and processes execution payloads directly from your TradingView strategy script """
     try:
         payload = await request.json()
         print(f"🚀 [TRADINGVIEW ALERT RECEIVED] Payload: {payload}")
         
-        action = payload.get("action")       # 'Cascade Long' or 'Cascade Short'
-        ticker = payload.get("ticker")       # e.g., 'EURUSD'
-        price = payload.get("close_price")   # Execution price index
+        action = payload.get("action")
+        ticker = payload.get("ticker")
+        price = payload.get("close_price")
         
         balances = database.get_ledger_metrics()
         fx_capital = balances.get("FOREX_RESERVE", 0.0)
         
         if fx_capital <= 0:
-            print("🔒 [EXECUTION HALTED] Forex Reserve balance is ₦0.00. Standing by for task engine allocations.")
+            print("🔒 [EXECUTION HALTED] Forex Reserve balance is ₦0.00.")
             return {"status": "ignored", "reason": "zero_capital"}
             
         if BROKER_TOKEN == "mock_secure_token_xxxx":
-            print(f"🔬 [SANDBOX ORDER] Signal matches criteria. Simulated {action} entry for {ticker} at {price}.")
+            print(f"🔬 [SANDBOX ORDER] Simulated {action} entry for {ticker} at {price}.")
         else:
             broker_payload = {
                 "instrument": ticker, 
@@ -89,7 +80,6 @@ async def tradingview_alert_receiver(request: Request):
             }
             requests.post(BROKER_API_URL, json=broker_payload, headers={"Authorization": f"Bearer {BROKER_TOKEN}"}, timeout=10)
             
-        # Pushes an instantaneous trading update straight to your personal device
         bot.send_message(
             chat_id=8608729377,
             text=f"📡 *TradingView Strategy Alert Executed!*\nAction: `{action}`\nAsset: `{ticker}`\nExecution Price: `{price}`\nVault Status: `Active Running`",
@@ -112,7 +102,6 @@ async def telegram_webhook_router(request: Request):
 
 @app.post("/paystack-webhook")
 async def paystack_webhook(request: Request):
-    """ Cryptographically authenticates and processes inbound merchant transaction receipts """
     payload = await request.body()
     signature = request.headers.get("X-Paystack-Signature")
     if not signature: 
@@ -141,7 +130,6 @@ async def paystack_webhook(request: Request):
             
     return {"status": "success"}
 
-# --- 5. Telegram UI Control Panel Matrix ---
 @bot.message_handler(commands=['start', 'dashboard'])
 def send_welcome(message):
     markup = InlineKeyboardMarkup(row_width=2)
@@ -189,10 +177,8 @@ def callback_inline(call):
     except Exception as e:
         print(f"❌ Callback evaluation context fault: {e}")
 
-# --- 6. MODULE 11: DYNAMIC NETWORK /TUNE CONSOLE RECEIVER ---
 @bot.message_handler(commands=['tune'])
 def adjust_investment_profile(message):
-    """ Guides the user on how to adjust portfolio allocation splits from their phone screen """
     guide_text = (
         "⚙️ *15-Tool Capital Tuning Matrix Console*\n\n"
         "To modify your automated percentage splits over the network, send a text line matching this exact syntax format:\n\n"
@@ -210,7 +196,37 @@ def process_tuning_input(message):
         parts = [float(x.strip()) for x in raw_data.split(",")]
         
         if len(parts) != 7:
-            bot.reply_to(message, "❌ *Configuration Fault:* You must pass exactly 7 matrix parameter values.")
+            bot.reply_to(message, "❌ *Configuration Fault:* You must pass exactly 7 parameter values.")
             return
 
-        # FLAT VALIDATION LOOP - Prevents any dynamic python indentation problems on mobile devices
+        total_sum = sum(parts)
+        # FLAT LOOP FORMAT: Eliminates nesting to ensure clean compilation on all mobile deployment frameworks
+        if abs(total_sum - 1.0) > 1e-4:
+            bot.reply_to(message, f"❌ *Validation Fault:* Sum total equals `{total_sum}`. It must equal exactly `1.0` (100%).")
+            return
+
+        new_matrix = {
+            "PERSONAL_UPKEEP": parts[0],
+            "CRYPTO_ARBITRAGE": parts[1],
+            "FOREX_RESERVE": parts[2],
+            "STOCKS_EQUITIES": parts[3],
+            "COMMODITIES_GOLD": parts[4],
+            "ALT_MARKETS": parts[5],
+            "SPORTS_BETTING": parts[6]
+        }
+        
+        success = database.update_tuning_matrix(new_matrix)
+        if success:
+            bot.reply_to(message, "🚀 *System Hotfix Active!* 15-Tool allocation splits updated successfully across all networks.")
+            return
+            
+        bot.reply_to(message, "❌ Core write-lock disk initialization timeout error occurred.")
+    except Exception as error:
+        bot.reply_to(message, f"❌ *Parsing Abnormality:* Verify configuration text syntax parameters. Error: {error}")
+
+def run_automated_database_backups():
+    BACKUP_DIR = "backups"
+    DB_SRC = "arbitrage_vault.db"
+    print("💾 [BACKUP SYSTEM] Core thread routine initiated.")
+    while True:
+        time.sleep(86400)
