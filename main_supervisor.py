@@ -37,9 +37,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-@app.route("/", methods=["GET", "HEAD"])
-def home_mesh_root(request: Request = None): 
+# FIXED ENDPOINT ROUTING GRID FOR FASTAPI
+@app.get("/")
+async def home_mesh_root(): 
     return {"status": "online"}
+
+@app.head("/")
+async def home_mesh_head():
+    return Response(status_code=200)
 
 @app.get("/health")
 def engine_health_check(): 
