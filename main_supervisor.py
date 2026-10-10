@@ -200,7 +200,6 @@ def process_tuning_input(message):
             return
 
         total_sum = sum(parts)
-        # FLAT LOOP FORMAT: Eliminates nesting to ensure clean compilation on all mobile deployment frameworks
         if abs(total_sum - 1.0) > 1e-4:
             bot.reply_to(message, f"❌ *Validation Fault:* Sum total equals `{total_sum}`. It must equal exactly `1.0` (100%).")
             return
@@ -222,7 +221,7 @@ def process_tuning_input(message):
             
         bot.reply_to(message, "❌ Core write-lock disk initialization timeout error occurred.")
     except Exception as error:
-        bot.reply_to(message, f"❌ *Parsing Abnormality:* Verify configuration text syntax parameters. Error: {error}")
+        bot.reply_to(message, f"❌ *Parsing Abnormality:* Error: {error}")
 
 def run_automated_database_backups():
     BACKUP_DIR = "backups"
@@ -230,3 +229,7 @@ def run_automated_database_backups():
     print("💾 [BACKUP SYSTEM] Core thread routine initiated.")
     while True:
         time.sleep(86400)
+        try:
+            if os.path.exists(DB_SRC):
+                if not os.path.exists(BACKUP_DIR):
+                    os.makedirs(BACKUP_DIR)
