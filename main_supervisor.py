@@ -13,7 +13,7 @@ import database
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://onrender.com").strip().rstrip('/')
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").strip().rstrip('/')
 
 BROKER_API_URL = os.getenv("BROKER_API_URL", "https://yourbroker.com")
 BROKER_TOKEN = os.getenv("BROKER_API_TOKEN", "mock_secure_token_xxxx")
@@ -27,13 +27,23 @@ async def lifespan(app: FastAPI):
     await asyncio.sleep(2)
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
     print(f"🌐 Linking Webhook Pipeline to: {webhook_url}")
-    try:
-        bot.remove_webhook()
-        await asyncio.sleep(1)
-        bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"])
-        print("🌐 Webhook linkage active!")
-    except Exception as e:
-        print(f"❌ Webhook initialization failed: {e}")
+    
+    # Resilient Retry Engine to bypass Telegram 429 Rate Limits
+    for attempt in range(1, 6):
+        try:
+            bot.remove_webhook()
+            await asyncio.sleep(2)
+            bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"])
+            print("🌐 Webhook linkage active and running!")
+            break
+        except Exception as e:
+            print(f"⚠️ Webhook linkage attempt {attempt}/5 failed: {e}")
+            if "Too Many Requests" in str(e) or "429" in str(e):
+                wait_time = attempt * 5
+                print(f"⏳ Rate limit triggered. Backing off for {wait_time} seconds...")
+                await asyncio.sleep(wait_time)
+            else:
+                await asyncio.sleep(2)
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -156,10 +166,9 @@ def callback_inline(call):
         elif call.data == "add_funds":
             user_string = str(call.from_user.id)
             
-            # Declaring the absolute path in a single f-string to prevent truncation
+            # Absolute, unfragmented payment link blueprint
             pay_url = f"https://paystack.shop{user_string}%7D"
             
-            # Formulating HTML layout text response cards
             text_reply = (
                 "💳 <b>Paystack Secure Gateway Ready</b>\n\n"
                 "Tap your payment link below to securely fund your automated matrix via Mpee global ventures:\n\n"
