@@ -129,7 +129,6 @@ def send_welcome(message):
         chat_id=message.chat.id,
         text="🤖 *Holding Master Engine Active.*\nSelect a monitoring hub parameter:",
         reply_markup=markup,
-        reply_markup=markup,
         parse_mode="Markdown"
     )
 
