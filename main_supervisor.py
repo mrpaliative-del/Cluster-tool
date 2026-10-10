@@ -12,7 +12,7 @@ import database
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").strip().rstrip('/')
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://onrender.com").strip().rstrip('/')
 
 BROKER_API_URL = os.getenv("BROKER_API_URL", "https://yourbroker.com")
 BROKER_TOKEN = os.getenv("BROKER_API_TOKEN", "mock_secure_token_xxxx")
@@ -137,6 +137,7 @@ def callback_inline(call):
     try:
         bot.answer_callback_query(callback_query_id=call.id)
         target_chat_id = call.message.chat.id
+        
         if call.data == "get_yields":
             balances = database.get_ledger_metrics()
             dashboard_text = (
@@ -150,24 +151,28 @@ def callback_inline(call):
                 f"⚽ *Sports Betting Vault (5%):* `₦{balances.get('SPORTS_BETTING', 0.0):,.2f}`"
             )
             bot.send_message(chat_id=target_chat_id, text=dashboard_text, parse_mode="Markdown")
-        elif call.data == "add_funds":
-            base_url = "https://paystack.shop"
-            pay_url = f"{base_url}?metadata=%7B%22telegram_id%22%3A{call.from_user.id}%7D"
             
-            dashboard_message = (
+        elif call.data == "add_funds":
+            user_id_string = str(call.from_user.id)
+            pay_url = f"https://paystack.shop{user_id_string}%7D"
+            
+            text_reply = (
                 "💳 *Paystack Secure Gateway Ready*\n\n"
-                "Tap your verification link below to launch the Mpee global ventures portal:\n\n"
-                f"🔗 {pay_url}\n\n"
-                "⚠️ *Notice:* Your user token is embedded in the checkout sequence."
+                "Tap your payment page link below to load your checkout dashboard securely via Mpee global ventures:\n\n"
+                f"{pay_url}"
             )
+            
             bot.send_message(
                 chat_id=target_chat_id,
-                text=dashboard_message,
-                parse_mode="Markdown",
-                disable_web_page_preview=True
+                text=text_reply,
+                parse_mode="Markdown"
             )
     except Exception as e:
-        print(f"❌ Callback context fault: {e}")
+        bot.send_message(
+            chat_id=call.message.chat.id, 
+            text=f"⚠️ *Internal Execution Error:* `{str(e)}`", 
+            parse_mode="Markdown"
+        )
 
 @bot.message_handler(commands=['tune'])
 def adjust_investment_profile(message):
