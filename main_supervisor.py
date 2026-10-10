@@ -97,7 +97,7 @@ async def operations_web_dashboard():
             .matrix-list {{ list-style: none; padding: 0; margin: 0; }}
             .matrix-item {{ display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding: 10px 0; font-size: 14px; }}
             .matrix-item:last-child {{ border: none; }}
-            .status-badge {{ background: #10b981; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold; }}
+            .status-badge {{ background: #10b981; color: white; padding: 4px 8px; border-radius: 6px; border-radius: 6px; font-size: 12px; font-weight: bold; }}
         </style>
     </head>
     <body>
