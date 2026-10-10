@@ -37,7 +37,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# FIXED ENDPOINT ROUTING GRID FOR FASTAPI
 @app.get("/")
 async def home_mesh_root(): 
     return {"status": "online"}
@@ -61,13 +60,10 @@ async def tradingview_alert_receiver(request: Request):
         action = payload.get("action")
         ticker = payload.get("ticker")
         price = payload.get("close_price")
-        
         balances = database.get_ledger_metrics()
         fx_capital = balances.get("FOREX_RESERVE", 0.0)
-        
         if fx_capital <= 0:
             return {"status": "ignored", "reason": "zero_capital"}
-            
         if BROKER_TOKEN == "mock_secure_token_xxxx":
             print(f"🔬 Simulated {action} entry for {ticker} at {price}.")
         else:
@@ -77,7 +73,6 @@ async def tradingview_alert_receiver(request: Request):
                 "type": "MARKET"
             }
             requests.post(BROKER_API_URL, json=broker_payload, headers={"Authorization": f"Bearer {BROKER_TOKEN}"}, timeout=10)
-            
         bot.send_message(
             chat_id=8608729377,
             text=f"📡 *Alert Executed!*\nAction: `{action}`\nAsset: `{ticker}`\nPrice: `{price}`",
@@ -103,17 +98,14 @@ async def paystack_webhook(request: Request):
     signature = request.headers.get("X-Paystack-Signature")
     if not signature: 
         return Response(status_code=status.HTTP_401_UNAUTHORIZED)
-        
     computed = hmac.new(PAYSTACK_SECRET, payload, hashlib.sha512).hexdigest()
     if not hmac.compare_digest(signature, computed):
         return Response(status_code=status.HTTP_401_UNAUTHORIZED)
-        
     data = await request.json()
     if data.get("event") == "charge.success":
         tg_id = data["data"]["metadata"].get("telegram_id")
         amount = data["data"]["amount"] / 100
         trx_ref = data["data"]["reference"]
-        
         is_new = database.record_deposit(trx_ref, tg_id, amount)
         if is_new and tg_id:
             try:
@@ -124,7 +116,6 @@ async def paystack_webhook(request: Request):
                 )
             except Exception as e:
                 print(f"⚠️ Telegram alert error: {e}")
-            
     return {"status": "success"}
 
 @bot.message_handler(commands=['start', 'dashboard'])
@@ -138,6 +129,7 @@ def send_welcome(message):
         chat_id=message.chat.id,
         text="🤖 *Holding Master Engine Active.*\nSelect a monitoring hub parameter:",
         reply_markup=markup,
+        reply_markup=markup,
         parse_mode="Markdown"
     )
 
@@ -146,7 +138,6 @@ def callback_inline(call):
     try:
         bot.answer_callback_query(callback_query_id=call.id)
         target_chat_id = call.message.chat.id
-        
         if call.data == "get_yields":
             balances = database.get_ledger_metrics()
             dashboard_text = (
@@ -160,7 +151,6 @@ def callback_inline(call):
                 f"⚽ *Sports Betting Vault (5%):* `₦{balances.get('SPORTS_BETTING', 0.0):,.2f}`"
             )
             bot.send_message(chat_id=target_chat_id, text=dashboard_text, parse_mode="Markdown")
-            
         elif call.data == "add_funds":
             pay_url = f"https://paystack.shop{call.from_user.id}%7D"
             bot.send_message(
@@ -186,16 +176,13 @@ def process_tuning_input(message):
     try:
         raw_data = message.text.replace("set_split:", "").strip()
         parts = [float(x.strip()) for x in raw_data.split(",")]
-        
         if len(parts) != 7:
             bot.reply_to(message, "❌ *Configuration Fault:* Pass exactly 7 parameter values.")
             return
-
         total_sum = sum(parts)
         if abs(total_sum - 1.0) > 1e-4:
             bot.reply_to(message, f"❌ *Validation Fault:* Sum total must equal exactly 1.0.")
             return
-
         new_matrix = {
             "PERSONAL_UPKEEP": parts,
             "CRYPTO_ARBITRAGE": parts,
@@ -205,12 +192,10 @@ def process_tuning_input(message):
             "ALT_MARKETS": parts,
             "SPORTS_BETTING": parts
         }
-        
         success = database.update_tuning_matrix(new_matrix)
         if success:
             bot.reply_to(message, "🚀 *Allocation splits updated successfully!*")
             return
-            
         bot.reply_to(message, "❌ Core database write-lock timeout error.")
     except Exception as error:
         bot.reply_to(message, f"❌ *Parsing Abnormality:* Error: {error}")
