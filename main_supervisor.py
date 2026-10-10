@@ -97,7 +97,7 @@ async def operations_web_dashboard():
             .matrix-list {{ list-style: none; padding: 0; margin: 0; }}
             .matrix-item {{ display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding: 10px 0; font-size: 14px; }}
             .matrix-item:last-child {{ border: none; }}
-            .status-badge {{ background: #10b981; color: white; padding: 4px 8px; border-radius: 6px; border-radius: 6px; font-size: 12px; font-weight: bold; }}
+            .status-badge {{ background: #10b981; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold; }}
         </style>
     </head>
     <body>
@@ -188,8 +188,9 @@ async def tradingview_alert_receiver(request: Request):
         if BROKER_TOKEN == "mock_secure_token_xxxx":
             print(f"🔬 Simulated {action} entry for {ticker} at {price}.")
         else:
+            units_val = (LOT_SIZE * 100000) if "Long" in action else -(LOT_SIZE * 100000)
             broker_payload = {
                 "instrument": ticker, 
-                "units": (LOT_SIZE * 100000) if "Long" in action else -(LOT_SIZE * 100000), 
+                "units": units_val, 
                 "type": "MARKET"
             }
