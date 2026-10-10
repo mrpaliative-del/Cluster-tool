@@ -16,8 +16,6 @@ import database
 # --- 1. Clean Environment Parameters (NON-HARDCODED) ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-
-# PRODUCTION FIX: Fallback dynamically points to your verified, active routing domain
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").strip().rstrip('/')
 
 bot = telebot.TeleBot(TOKEN, threaded=False)
@@ -98,12 +96,12 @@ async def paystack_webhook(request: Request):
 def send_welcome(message):
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("📊 View Yields", callback_data="get_yields"),
+        InlineKeyboardButton("📊 Portfolio Matrix", callback_data="get_yields"),
         InlineKeyboardButton("💳 Add Funds", callback_data="add_funds")
     )
     bot.send_message(
         chat_id=message.chat.id,
-        text="🤖 *Arbitrage Core Engine Active.*\nSelect an operational parameters lane below to scan live liquidity matrices:",
+        text="🤖 *Holding Firm 7-Asset Master Engine Active.*\nSelect a monitoring hub parameter below to analyze your live quantitative allocations:",
         reply_markup=markup,
         parse_mode="Markdown"
     )
@@ -115,15 +113,23 @@ def callback_inline(call):
         target_chat_id = call.message.chat.id
         
         if call.data == "get_yields":
-            # Pull metrics values out of thread-safe relational database index rows
-            vault_bal, current_yield = database.get_ledger_metrics()
-            bot.send_message(
-                chat_id=target_chat_id,
-                text=f"📈 *Live Performance Output:*\nToday's Yield: `+{current_yield}%` \nTotal Vault Balance: `₦{vault_bal:,.2f}`",
-                parse_mode="Markdown"
+            # PRODUCTION FIX: Safely extract dictionary values from your updated 7-Asset relational database index
+            balances = database.get_ledger_metrics()
+            
+            dashboard_text = (
+                "📈 *Unified 7-Asset Holding Dashboard*\n\n"
+                f"💳 *Personal Upkeep (20%):* `₦{balances.get('PERSONAL_UPKEEP', 0.0):,.2f}`\n"
+                f"🤖 *Crypto Arbitrage Core (20%):* `₦{balances.get('CRYPTO_ARBITRAGE', 0.0):,.2f}`\n"
+                f"💱 *Forex Allocation Vault (20%):* `₦{balances.get('FOREX_RESERVE', 0.0):,.2f}`\n"
+                f"📈 *Stocks & Equities (15%):* `₦{balances.get('STOCKS_EQUITIES', 0.0):,.2f}`\n"
+                f"✨ *Commodities & Gold (10%):* `₦{balances.get('COMMODITIES_GOLD', 0.0):,.2f}`\n"
+                f"📊 *Alternative Markets (10%):* `₦{balances.get('ALT_MARKETS', 0.0):,.2f}`\n"
+                f"⚽ *Sports Betting Vault (5%):* `₦{balances.get('SPORTS_BETTING', 0.0):,.2f}`\n\n"
+                "🔒 *Status:* 7-Asset Portfolio Matrix Lock active. All background processes running."
             )
+            bot.send_message(chat_id=target_chat_id, text=dashboard_text, parse_mode="Markdown")
+            
         elif call.data == "add_funds":
-            # PRODUCTION FIX: Linked your exact live paystack.shop storefront along with dynamic metadata tracking parameters
             pay_url = f"https://paystack.shop{call.from_user.id}%7D"
             bot.send_message(
                 chat_id=target_chat_id,
@@ -142,7 +148,6 @@ def run_automated_database_backups():
     
     print("💾 [BACKUP SYSTEM] Core thread routine initiated.")
     while True:
-        # Check every 24 hours (86400 seconds)
         time.sleep(86400)
         try:
             if os.path.exists(DB_SRC):
@@ -152,11 +157,9 @@ def run_automated_database_backups():
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
                 backup_filename = f"{BACKUP_DIR}/vault_snapshot_{timestamp}.db"
                 
-                # Perform hot disk copy operation safely
                 shutil.copy2(DB_SRC, backup_filename)
                 print(f"✅ [BACKUP SYSTEM] Database snapshot created successfully: {backup_filename}")
                 
-                # Retention Maintenance Array: Keep only the 7 most recent snapshots to prevent storage bloat
                 all_backups = sorted(
                     [os.path.join(BACKUP_DIR, f) for f in os.listdir(BACKUP_DIR) if f.endswith('.db')],
                     key=os.path.getmtime
@@ -173,7 +176,6 @@ def run_keep_alive_loops():
     asyncio.run(keep_alive.start_parallel_loops())
 
 if __name__ == "__main__":
-    # Launch monitoring loops and backup threads concurrently
     threading.Thread(target=run_keep_alive_loops, daemon=True).start()
     threading.Thread(target=run_automated_database_backups, daemon=True).start()
 
