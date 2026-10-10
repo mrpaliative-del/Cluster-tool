@@ -13,7 +13,7 @@ import database
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://cluster-tool-1.onrender.com").strip().rstrip('/')
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://onrender.com").strip().rstrip('/')
 
 BROKER_API_URL = os.getenv("BROKER_API_URL", "https://yourbroker.com")
 BROKER_TOKEN = os.getenv("BROKER_API_TOKEN", "mock_secure_token_xxxx")
@@ -21,9 +21,40 @@ LOT_SIZE = 0.1
 
 bot = telebot.TeleBot(TOKEN, threaded=False)
 
+def sync_paystack_settlement_profile():
+    """
+    Queries Paystack APIs to safely extract your updated local payout bank 
+    account details and updates your engine records seamlessly.
+    """
+    secret_key = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").strip()
+    headers = {"Authorization": f"Bearer {secret_key}"}
+    
+    try:
+        # Request active configuration properties from Paystack Business Profile
+        profile_res = requests.get("https://paystack.co", headers=headers, timeout=10)
+        
+        if profile_res.status_code == 200:
+            biz_data = profile_res.json().get("data", {})
+            
+            # Map parameters safely with fallbacks
+            bank_name = biz_data.get("settlement_bank", "Unknown Bank")
+            account_no = biz_data.get("settlement_account_number", "—")
+            account_name = biz_data.get("settlement_account_name", "Mpee global ventures")
+            
+            # Sync changes with the database script
+            database.update_settlement_account(bank_name, account_no, account_name)
+        else:
+            print("⚠️ Paystack profile sync returned non-200 check; utilizing fallback cache.")
+    except Exception as e:
+        print(f"⚠️ Automated bank settlement profile sync error: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     database.init_db()
+    
+    # ⚡ Execute the direct live bank account sync procedure on initialization
+    sync_paystack_settlement_profile()
+    
     await asyncio.sleep(2)
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
     print(f"🌐 Linking Webhook Pipeline to: {webhook_url}")
@@ -166,7 +197,6 @@ def callback_inline(call):
         elif call.data == "add_funds":
             user_string = str(call.from_user.id)
             
-            # Isolated variables completely prevent internal regex string cuts
             target_domain = "https://paystack.shop"
             target_route = "/pay/arbitrage-vault-deposit"
             
@@ -175,11 +205,19 @@ def callback_inline(call):
             
             pay_url = f"{target_domain}{target_route}?{encoded_payload}"
             
+            # Fetch the freshly auto-synced local bank particulars directly from database memory
+            bank_profile = database.get_settlement_account()
+            
             text_reply = (
                 "💳 <b>Paystack Secure Gateway Ready</b>\n\n"
                 "Tap your payment link below to securely fund your automated matrix via Mpee global ventures:\n\n"
                 f'🔗 <a href="{pay_url}">Proceed to Secure Checkout</a>\n\n'
-                f"<code>{pay_url}</code>"
+                f"<code>{pay_url}</code>\n\n"
+                "📌 <b>Direct Settlement Bank Details (Synced via Paystack):</b>\n"
+                f"🏛️ <b>Bank Name:</b> {bank_profile.get('bank', 'Not Synced')}\n"
+                f"🔢 <b>Account No:</b> {bank_profile.get('account_number', '—')}\n"
+                f"👤 <b>Account Name:</b> {bank_profile.get('account_name', '—')}\n\n"
+                "<i>Your payment automatically updates your matrix ledger instantly.</i>"
             )
             
             bot.send_message(
@@ -196,43 +234,3 @@ def callback_inline(call):
         )
 
 @bot.message_handler(commands=['tune'])
-def adjust_investment_profile(message):
-    guide_text = (
-        "⚙️ *15-Tool Tuning Console*\n\n"
-        "Send a line matching this exact format to update splits:\n\n"
-        "`set_split: 0.10, 0.30, 0.20, 0.10, 0.10, 0.15, 0.05`"
-    )
-    bot.send_message(chat_id=message.chat.id, text=guide_text, parse_mode="Markdown")
-
-@bot.message_handler(func=lambda msg: msg.text and msg.text.startswith("set_split:"))
-def process_tuning_input(message):
-    try:
-        raw_data = message.text.replace("set_split:", "").strip()
-        parts = [float(x.strip()) for x in raw_data.split(",")]
-        if len(parts) != 7:
-            bot.reply_to(message, "❌ *Configuration Fault:* Pass exactly 7 parameter values.")
-            return
-        total_sum = sum(parts)
-        if abs(total_sum - 1.0) > 1e-4:
-            bot.reply_to(message, f"❌ *Validation Fault:* Sum total must equal exactly 1.0.")
-            return
-        new_matrix = {
-            "PERSONAL_UPKEEP": parts,
-            "CRYPTO_ARBITRAGE": parts,
-            "FOREX_RESERVE": parts,
-            "STOCKS_EQUITIES": parts,
-            "COMMODITIES_GOLD": parts,
-            "ALT_MARKETS": parts,
-            "SPORTS_BETTING": parts
-        }
-        success = database.update_tuning_matrix(new_matrix)
-        if success:
-            bot.reply_to(message, "🚀 *Allocation splits updated successfully!*")
-            return
-        bot.reply_to(message, "❌ Core database write-lock timeout error.")
-    except Exception as error:
-        bot.reply_to(message, f"❌ *Parsing Abnormality:* Error: {error}")
-
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
