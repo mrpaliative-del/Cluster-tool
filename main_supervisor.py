@@ -188,9 +188,10 @@ async def tradingview_alert_receiver(request: Request):
         if BROKER_TOKEN == "mock_secure_token_xxxx":
             print(f"🔬 Simulated {action} entry for {ticker} at {price}.")
         else:
-            units_val = (LOT_SIZE * 100000) if "Long" in action else -(LOT_SIZE * 100000)
+            if "Long" in str(action):
+                calculated_units = LOT_SIZE * 100000
+            else:
+                calculated_units = -(LOT_SIZE * 100000)
+                
             broker_payload = {
                 "instrument": ticker, 
-                "units": units_val, 
-                "type": "MARKET"
-            }
