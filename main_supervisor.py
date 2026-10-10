@@ -153,21 +153,19 @@ def callback_inline(call):
             bot.send_message(chat_id=target_chat_id, text=dashboard_text, parse_mode="Markdown")
             
         elif call.data == "add_funds":
-            user_id_string = str(call.from_user.id)
-            pay_url = f"https://paystack.shop{user_id_string}%7D"
+            user_string = str(call.from_user.id)
+            pay_url = f"https://paystack.shop{user_string}%7D"
             
-            # Using clean HTML tagging prevents parsing or character drop failures
-            text_reply = (
-                "💳 <b>Paystack Secure Gateway Ready</b>\n\n"
-                "Tap your payment page link below to load your checkout dashboard securely via Mpee global ventures:\n\n"
-                f'<a href="{pay_url}">{pay_url}</a>'
+            inline_gate = InlineKeyboardMarkup()
+            inline_gate.add(
+                InlineKeyboardButton(text="💳 Open Secure Gateway", url=pay_url)
             )
             
             bot.send_message(
                 chat_id=target_chat_id,
-                text=text_reply,
+                text="💳 <b>Paystack Secure Gateway Ready</b>\n\nClick the action button below to load your personal checkout matrix via Mpee global ventures safely:",
                 parse_mode="HTML",
-                disable_web_page_preview=True
+                reply_markup=inline_gate
             )
     except Exception as e:
         bot.send_message(
