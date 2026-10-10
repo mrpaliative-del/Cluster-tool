@@ -155,22 +155,30 @@ def callback_inline(call):
             
         elif call.data == "add_funds":
             user_string = str(call.from_user.id)
-            raw_metadata = '{"telegram_id":' + user_string + '}'
-            encoded_metadata = urllib.parse.quote(raw_metadata)
             
-            # Switched domain layer to official Paystack link format
-            pay_url = f"https://pay.stack{encoded_metadata}"
+            # Segmenting the string guarantees absolute copy-paste structural layout preservation
+            link_segments = [
+                "https://paystack.shop",
+                "?metadata=",
+                "%7B%22telegram_id%22%3A",
+                user_string,
+                "%7D"
+            ]
+            pay_url = "".join(link_segments)
             
-            inline_gate = InlineKeyboardMarkup()
-            inline_gate.add(
-                InlineKeyboardButton(text="💳 Open Secure Gateway", url=pay_url)
+            # Delivers pure text hyperlinks backed with raw copyable string arrays
+            text_reply = (
+                "💳 <b>Paystack Secure Gateway Ready</b>\n\n"
+                "Tap your payment link below to securely fund your automated matrix via Mpee global ventures:\n\n"
+                f'🔗 <a href="{pay_url}">Proceed to Secure Checkout</a>\n\n'
+                f"<code>{pay_url}</code>"
             )
             
             bot.send_message(
                 chat_id=target_chat_id,
-                text="💳 <b>Paystack Secure Gateway Ready</b>\n\nClick the action button below to load your personal checkout matrix via Mpee global ventures safely:",
+                text=text_reply,
                 parse_mode="HTML",
-                reply_markup=inline_gate
+                disable_web_page_preview=True
             )
     except Exception as e:
         bot.send_message(
