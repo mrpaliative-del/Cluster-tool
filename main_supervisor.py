@@ -166,10 +166,12 @@ def callback_inline(call):
         elif call.data == "add_funds":
             user_string = str(call.from_user.id)
             
-            # Isolated components ensure no character fragmentation can occur at runtime
-            base_endpoint = "https://paystack.shop"
-            tracking_payload = f"?metadata=%7B%22telegram_id%22%3A{user_string}%7D"
-            pay_url = f"{base_endpoint}{tracking_payload}"
+            # ⚡ Formulate the tracking payload safely using dictionary structures
+            base_url = "https://paystack.shop"
+            query_params = {"metadata": '{"telegram_id":' + user_string + '}'}
+            
+            # urlencode guarantees that paths cannot split, slice, or corrupt during compilation
+            pay_url = f"{base_url}?{urllib.parse.urlencode(query_params)}"
             
             text_reply = (
                 "💳 <b>Paystack Secure Gateway Ready</b>\n\n"
