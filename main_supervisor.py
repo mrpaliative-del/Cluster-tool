@@ -212,5 +212,5 @@ def process_tuning_input(message):
         if len(parts) != 7:
             bot.reply_to(message, "❌ *Configuration Fault:* You must pass exactly 7 matrix parameter values.")
             return
-            
-        if abs(sum(parts) - 1.0) > 1e-4:
+
+        # FLAT VALIDATION LOOP - Prevents any dynamic python indentation problems on mobile devices
