@@ -1,6 +1,7 @@
-fastapi
-uvicorn
-pyTelegramBotAPI
-httpx
-playwright
-requests
+
+fastapi>=0.115,<1.0
+uvicorn>=0.30,<1.0
+requests>=2.32,<3.0
+httpx>=0.27,<1.0
+pyTelegramBotAPI>=4.20,<5.0
+playwright>=1.48,<2.0
