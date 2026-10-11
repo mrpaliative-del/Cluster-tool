@@ -1,202 +1,306 @@
-import os
-import uvicorn
-import hmac
-import hashlib
-import telebot
+
 import asyncio
-import requests
-import time
-import urllib.parse
-from fastapi import FastAPI, Request, Response, status
-from fastapi.responses import HTMLResponse
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
+import html
+import json
+import logging
+import os
 from contextlib import asynccontextmanager
+from typing import Any
+
+import telebot
+import uvicorn
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from telebot.types import Update
+
 import database
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8608729377:AAE9L9fNEDMyvZjG0aGYVRYu34psvSDdb-A").strip()
-PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").encode('utf-8')
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://onrender.com").strip().rstrip('/')
 
-BROKER_API_URL = os.getenv("BROKER_API_URL", "https://yourbroker.com")
-BROKER_TOKEN = os.getenv("BROKER_API_TOKEN", "mock_secure_token_xxxx")
-LOT_SIZE = 0.1
+# =========================================================
+# CONFIGURATION — set secrets in Render Environment Variables
+# =========================================================
 
-bot = telebot.TeleBot(TOKEN, threaded=False)
+APP_HOST = "0.0.0.0"
+APP_PORT = int(os.getenv("PORT", "10000"))
 
-# Tracking telemetry matrices
-ALERT_COUNTER = 0
-LAST_ALERT_TIME = "N/A"
-SCANNER_ITERATIONS = 0
-ACCUMULATED_SCANNER_USD = 0.0
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_ADMIN_CHAT_ID = os.getenv("TELEGRAM_ADMIN_CHAT_ID", "").strip()
+TELEGRAM_WEBHOOK_SECRET = os.getenv(
+    "TELEGRAM_WEBHOOK_SECRET", ""
+).strip()
 
-class TemplateEngine:
-    @staticmethod
-    def get_dashboard_html() -> str:
-        return """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mpee Global Ventures - Matrix Ops Board</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 16px; margin-bottom: 24px; }
-        h1, h2 { margin: 0; color: #38bdf8; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 24px; }
-        .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-        .card-title { font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 8px; }
-        .card-value { font-size: 28px; font-weight: bold; color: #f1f5f9; }
-        .matrix-list { list-style: none; padding: 0; margin: 0; }
-        .matrix-item { display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding: 10px 0; font-size: 14px; }
-        .matrix-item:last-child { border: none; }
-        .status-badge { background: #10b981; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div>
-                <h1>Mpee Global Ventures</h1>
-                <div style="color: #94a3b8; font-size: 14px; margin-top: 4px;">Automated Allocation Matrix Ops Control Center</div>
-            </div>
-            <span class="status-badge">ENGINE ONLINE</span>
-        </div>
-        
-        <h2>📊 Operational Financial Performance</h2>
-        <div class="grid" style="margin-top: 12px;">
-            <div class="card">
-                <div class="card-title">Gross Volume Processed</div>
-                <div class="card-value">VAL_GROSS</div>
-            </div>
-            <div class="card">
-                <div class="card-title">Active Matrix Liquidity Pool</div>
-                <div class="card-value">VAL_POOL</div>
-            </div>
-            <div class="card">
-                <div class="card-title">Successful Deposits</div>
-                <div class="card-value">VAL_DEPOSITS</div>
-            </div>
-        </div>
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+WEBHOOK_PATH = "/tg-backend-intake"
 
-        <div class="grid" style="grid-template-columns: 2fr 1fr;">
-            <div class="card">
-                <h2>🗂️ Asset Class Allocation Balances</h2>
-                <div class="matrix-list" style="margin-top: 12px;">
-                    <div class="matrix-item"><span>💳 Personal Upkeep (20%)</span><strong>VAL_M1</strong></div>
-                    <div class="matrix-item"><span>🤖 Crypto Arbitrage Core (20%)</span><strong>VAL_M2</strong></div>
-                    <div class="matrix-item"><span>💱 Forex Allocation Vault (20%)</span><strong>VAL_M3</strong></div>
-                    <div class="matrix-item"><span>📈 Stocks & Equities (15%)</span><strong>VAL_M4</strong></div>
-                    <div class="matrix-item"><span>✨ Commodities & Gold (10%)</span><strong>VAL_M5</strong></div>
-                    <div class="matrix-item"><span>📊 Alternative Markets (10%)</span><strong>VAL_M6</strong></div>
-                    <div class="matrix-item"><span>⚽ Sports Betting Vault (5%)</span><strong>VAL_M7</strong></div>
-                </div>
-            </div>
-            
-            <div class="card">
-                <h2>⚡ System Telemetry</h2>
-                <div class="matrix-list" style="margin-top: 12px;">
-                    <div class="matrix-item"><span>Database Node</span><span style="color: #10b981; font-weight: bold;">VAL_DB</span></div>
-                    <div class="matrix-item"><span>Continuous Scanning Engine</span><span style="color: #38bdf8; font-weight: bold;">ACTIVE</span></div>
-                    <div class="matrix-item"><span>Verified Jobs Scanned</span><strong>VAL_SCAN_QTY</strong></div>
-                    <div class="matrix-item"><span>Scanner Yield Pool</span><span style="color: #10b981; font-weight: bold;">$VAL_SCAN_USD</span></div>
-                    <div class="matrix-item"><span>TV Alerts Executed</span><strong>VAL_COUNT</strong></div>
-                    <div class="matrix-item"><span>Last Signal Frame</span><span style="font-family: monospace; font-size: 12px;">VAL_TIME</span></div>
-                </div>
-            </div>
-        </div>
-    </div>
-</body>
-</html>"""
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-def sync_paystack_settlement_profile():
-    secret_key = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").strip()
-    headers = {"Authorization": f"Bearer {secret_key}"}
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger("free-arbitrage-mesh")
+
+# Never substitute a fake token or a real-looking hard-coded secret.
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False) if TELEGRAM_BOT_TOKEN else None
+
+DATABASE_READY = False
+WEBHOOK_CONFIGURED = False
+STARTED_AT = None
+
+
+# =========================================================
+# TELEGRAM HANDLERS
+# Merge your existing command/callback handlers below.
+# =========================================================
+
+if bot:
+
+    @bot.message_handler(commands=["start"])
+    def handle_start(message):
+        bot.reply_to(
+            message,
+            "Welcome. The service is connected.\n"
+            "Use /help to see available commands."
+        )
+
+    @bot.message_handler(commands=["help"])
+    def handle_help(message):
+        bot.reply_to(
+            message,
+            "Available commands:\n"
+            "/start - Start the bot\n"
+            "/help - Show this help message\n\n"
+            "Market scans and financial results must be "
+            "based on verified data."
+        )
+
+
+# =========================================================
+# DATABASE / BACKGROUND LIFECYCLE
+# =========================================================
+
+async def configure_telegram_webhook() -> None:
+    global WEBHOOK_CONFIGURED
+
+    if not bot:
+        logger.warning("Telegram disabled: TELEGRAM_BOT_TOKEN is missing.")
+        return
+
+    if not RENDER_EXTERNAL_URL.startswith("https://"):
+        logger.warning(
+            "Telegram webhook not configured: set the correct "
+            "HTTPS RENDER_EXTERNAL_URL."
+        )
+        return
+
+    webhook_url = f"{RENDER_EXTERNAL_URL}{WEBHOOK_PATH}"
+
     try:
-        profile_res = requests.get("https://paystack.co", headers=headers, timeout=10)
-        if profile_res.status_code == 200:
-            biz_data = profile_res.json().get("data", {})
-            bank_name = biz_data.get("settlement_bank", "Unknown Bank")
-            account_no = biz_data.get("settlement_account_number", "—")
-            account_name = biz_data.get("settlement_account_name", "Mpee global ventures")
-            database.update_settlement_account(bank_name, account_no, account_name)
-            print(f"💾 Dynamic account layout update succeeded: {bank_name}")
-    except Exception as e:
-        print(f"⚠️ Automated bank settlement profile sync error: {e}")
+        kwargs = {
+            "url": webhook_url,
+            "allowed_updates": ["message", "callback_query"],
+        }
 
-async def nanosecond_task_scanning_engine():
-    global SCANNER_ITERATIONS, ACCUMULATED_SCANNER_USD
-    print("⚡ Nanosecond Hot Path Target Locked: 15-in-1 Task Job Scanning Matrix Online.")
-    USD_TO_NGN_RATE = 1650.0
-    
-    while True:
-        try:
-            SCANNER_ITERATIONS += 14500
-            ACCUMULATED_SCANNER_USD += 1.25
-            
-            if ACCUMULATED_SCANNER_USD >= 50.0:
-                injection_ngn = 50.0 * USD_TO_NGN_RATE
-                print(f"🎯 Scanner Milestone Reached: ${ACCUMULATED_SCANNER_USD:.2f} USD. Routing ₦{injection_ngn:,.2f} into Matrix.")
-                
-                database.record_deposit(
-                    reference=f"SCAN-AUTO-FEED-{int(time.time())}",
-                    telegram_id=8608729377,
-                    amount=injection_ngn
-                )
-                
-                try:
-                    bot.send_message(
-                        chat_id=8608729377,
-                        text=f"🔄 *Scanner Auto-Feed Triggered!*\nAccumulated: `${ACCUMULATED_SCANNER_USD:.2f} USD`\nInjected: `₦{injection_ngn:,.2f}` distributed across layers.",
-                        parse_mode="Markdown"
-                    )
-                except Exception as ex:
-                    print(f"⚠️ Notification failure: {ex}")
-                    
-                ACCUMULATED_SCANNER_USD = 0.0
-                
-            await asyncio.sleep(0.5)
-        except Exception as e:
-            print(f"⚠️ Scanner process cycle anomaly: {e}")
-            await asyncio.sleep(2)
+        if TELEGRAM_WEBHOOK_SECRET:
+            kwargs["secret_token"] = TELEGRAM_WEBHOOK_SECRET
+
+        await asyncio.to_thread(bot.set_webhook, **kwargs)
+        WEBHOOK_CONFIGURED = True
+        logger.info("Telegram webhook configured.")
+
+    except Exception:
+        logger.exception("Telegram webhook configuration failed.")
+        WEBHOOK_CONFIGURED = False
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    database.init_db()
-    loop = asyncio.get_event_loop()
-    
-    asyncio.ensure_future(loop.run_in_executor(None, sync_paystack_settlement_profile))
-    asyncio.ensure_future(nanosecond_task_scanning_engine())
-    
-    await asyncio.sleep(2)
-    webhook_url = f"{RENDER_URL}/tg-backend-intake"
-    
-    for attempt in range(1, 6):
-        try:
-            bot.remove_webhook()
-            await asyncio.sleep(2)
-            bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"])
-            print("🌐 Webhook linkage active and running!")
-            break
-        except Exception as e:
-            print(f"⚠️ Webhook linkage failure: {e}")
-            await asyncio.sleep(attempt * 3)
-    yield
+    global DATABASE_READY, STARTED_AT
 
-app = FastAPI(lifespan=lifespan)
+    import time
+    STARTED_AT = time.time()
+
+    # Fail visibly if database initialization fails.
+    await asyncio.to_thread(database.init_db)
+    DATABASE_READY = True
+    logger.info("Database initialized.")
+
+    await configure_telegram_webhook()
+
+    # The scraper and task hunter are separate Supervisor programs.
+    # Do not create duplicate scanner loops in this web process.
+    try:
+        yield
+    finally:
+        logger.info("FastAPI application shutting down.")
+
+
+app = FastAPI(
+    title="Free Arbitrage Mesh",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+
+
+# =========================================================
+# HEALTH / READINESS
+# /health checks the web service.
+# /ready reports whether key startup dependencies are ready.
+# =========================================================
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "ok",
+        "service": "free-arbitrage-mesh",
+    }
+
+
+@app.get("/ready")
+async def readiness():
+    ready = DATABASE_READY
+
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={
+            "ready": ready,
+            "database_ready": DATABASE_READY,
+            "telegram_configured": bot is not None,
+            "telegram_webhook_configured": WEBHOOK_CONFIGURED,
+        },
+    )
+
+
+# =========================================================
+# TELEGRAM WEBHOOK
+# =========================================================
+
+@app.post(WEBHOOK_PATH)
+async def telegram_webhook(request: Request):
+    if not bot:
+        raise HTTPException(
+            status_code=503,
+            detail="Telegram integration is not configured.",
+        )
+
+    if TELEGRAM_WEBHOOK_SECRET:
+        supplied_secret = request.headers.get(
+            "X-Telegram-Bot-Api-Secret-Token", ""
+        )
+
+        # Use constant-time comparison for the webhook secret.
+        import hmac
+
+        if not hmac.compare_digest(
+            supplied_secret, TELEGRAM_WEBHOOK_SECRET
+        ):
+            raise HTTPException(status_code=401, detail="Invalid webhook secret.")
+
+    try:
+        payload = await request.json()
+
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Invalid update format.")
+
+        update = Update.de_json(payload)
+
+        if update is None:
+            raise HTTPException(status_code=400, detail="Invalid Telegram update.")
+
+        await asyncio.to_thread(bot.process_new_updates, [update])
+
+        return {"ok": True}
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Telegram webhook processing failed.")
+        raise HTTPException(status_code=500, detail="Webhook processing failed.")
+
+
+# =========================================================
+# DASHBOARD
+# =========================================================
 
 @app.get("/", response_class=HTMLResponse)
-async def operations_web_dashboard(): 
-    perf = database.get_comprehensive_performance_metrics()
-    summary = perf.get("financial_summary", {})
-    matrix = perf.get("portfolio_matrix_breakdown", {})
-    infra = perf.get("infrastructure_telemetry", {})
-    
-    html = TemplateEngine.get_dashboard_html()
-    
-    html = html.replace("VAL_GROSS", f"₦{summary.get('gross_volume_processed_ngn', 0.0):,.2f}")
-    html = html.replace("VAL_POOL", f"₦{summary.get('active_matrix_allocation_pool_ngn', 0.0):,.2f}")
-    html = html.replace("VAL_DEPOSITS", f"{summary.get('total_successful_deposits', 0)} Transactions")
-    html = html.replace("VAL_M1", f"₦{matrix.get('PERSONAL_UPKEEP', 0.0):,.2f}")
-    html = html.replace("VAL_M2", f"₦{matrix.get('CRYPTO_ARBITRAGE', 0.0):,.2f}")
-    html = html.replace("VAL_M3", f"₦{matrix.get('FOREX_RESERVE', 0.0):,.2f}")
+async def operations_web_dashboard():
+    metrics: Any = {}
+
+    if DATABASE_READY:
+        try:
+            metrics = await asyncio.to_thread(
+                database.get_comprehensive_performance_metrics
+            )
+        except Exception:
+            logger.exception("Could not load dashboard metrics.")
+            metrics = {"error": "Metrics temporarily unavailable"}
+
+    if not isinstance(metrics, (dict, list, str, int, float, type(None))):
+        metrics = str(metrics)
+
+    metrics_json = html.escape(
+        json.dumps(metrics, indent=2, default=str)
+    )
+
+    database_status = "READY" if DATABASE_READY else "NOT READY"
+    telegram_status = "CONFIGURED" if bot else "NOT CONFIGURED"
+    webhook_status = "CONFIGURED" if WEBHOOK_CONFIGURED else "NOT CONFIGURED"
+
+    return f"""
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      <title>Free Arbitrage Mesh</title>
+      <style>
+        body {{
+          margin: 0; padding: 24px; background: #101827;
+          color: #edf2f7; font: 16px/1.5 Arial, sans-serif;
+        }}
+        main {{ max-width: 850px; margin: auto; }}
+        section {{
+          background: #1b2738; border: 1px solid #344256;
+          border-radius: 12px; padding: 18px; margin: 14px 0;
+        }}
+        h1 {{ font-size: 25px; }}
+        pre {{ white-space: pre-wrap; overflow-wrap: anywhere; }}
+        .muted {{ color: #bac6d6; }}
+      </style>
+    </head>
+    <body>
+      <main>
+        <h1>Free Arbitrage Mesh</h1>
+        <p class="muted">
+          Operational status dashboard. Status indicators do not
+          represent verified trading profits or guaranteed returns.
+        </p>
+        <section>
+          <h2>Service status</h2>
+          <p>Web application: RUNNING</p>
+          <p>Database: {html.escape(database_status)}</p>
+          <p>Telegram: {html.escape(telegram_status)}</p>
+          <p>Telegram webhook: {html.escape(webhook_status)}</p>
+        </section>
+        <section>
+          <h2>Database performance metrics</h2>
+          <pre>{metrics_json}</pre>
+        </section>
+        <section>
+          <p>Health check: <a href="/health">/health</a></p>
+          <p>Readiness check: <a href="/ready">/ready</a></p>
+        </section>
+      </main>
+    </body>
+    </html>
+    """
+
+
+if __name__ == "__main__":
+    uvicorn.run(
+        app,
+        host=APP_HOST,
+        port=APP_PORT,
+        log_level=LOG_LEVEL.lower(),
+        access_log=True,
+    )
