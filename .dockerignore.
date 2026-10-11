@@ -1,0 +1,61 @@
+
+# Git history and local editor settings
+.git
+.gitignore
+.gitattributes
+.github
+.vscode
+.idea
+
+# Python environments and caches
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Secrets and local environment configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+
+# Local databases and runtime state
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+task_hunter_state.sqlite3
+matrix_system.db
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+
+# Build outputs (Java JAR is copied from the builder stage)
+target/
+build/
+dist/
+
+# Node dependencies and unrelated local packages
+node_modules/
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+
+# Backups
+*.bak
+*.backup
+*.old
