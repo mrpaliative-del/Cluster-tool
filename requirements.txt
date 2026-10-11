@@ -3,3 +3,4 @@ uvicorn
 pyTelegramBotAPI
 httpx
 playwright
+requests
