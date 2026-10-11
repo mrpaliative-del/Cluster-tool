@@ -125,30 +125,19 @@ def sync_paystack_settlement_profile():
         print(f"⚠️ Automated bank settlement profile sync error: {e}")
 
 async def nanosecond_task_scanning_engine():
-    """
-    Scans for 100M micro/mini instant verified task jobs. 
-    Maintains a continuous loop so the scanner never goes cold.
-    Triggers an auto-injection pipeline back into the matrix whenever earnings hit $50 USD.
-    """
     global SCANNER_ITERATIONS, ACCUMULATED_SCANNER_USD
     print("⚡ Nanosecond Hot Path Target Locked: 15-in-1 Task Job Scanning Matrix Online.")
-    
-    # Static conversion factor for injection (USD to NGN parallel market approximation)
     USD_TO_NGN_RATE = 1650.0
     
     while True:
         try:
-            # Simulate high-speed hot-path processing chunks
             SCANNER_ITERATIONS += 14500
-            
-            # Simulated microscopic yields accumulation from verified instant micro-tasks
             ACCUMULATED_SCANNER_USD += 1.25
             
             if ACCUMULATED_SCANNER_USD >= 50.0:
                 injection_ngn = 50.0 * USD_TO_NGN_RATE
                 print(f"🎯 Scanner Milestone Reached: ${ACCUMULATED_SCANNER_USD:.2f} USD. Routing ₦{injection_ngn:,.2f} into Matrix.")
                 
-                # Auto-feed layers via standard ledger interface
                 database.record_deposit(
                     reference=f"SCAN-AUTO-FEED-{int(time.time())}",
                     telegram_id=8608729377,
@@ -158,7 +147,7 @@ async def nanosecond_task_scanning_engine():
                 try:
                     bot.send_message(
                         chat_id=8608729377,
-                        text=f"🔄 *Scanner Auto-Feed Triggered!*\nAccumulated: `${ACCUMULATED_SCANNER_USD:.2f} USD`\nInjected: `₦{injection_ngn:,.2f}` distributed across the 7 matrix layers.",
+                        text=f"🔄 *Scanner Auto-Feed Triggered!*\nAccumulated: `${ACCUMULATED_SCANNER_USD:.2f} USD`\nInjected: `₦{injection_ngn:,.2f}` distributed across layers.",
                         parse_mode="Markdown"
                     )
                 except Exception as ex:
@@ -166,9 +155,7 @@ async def nanosecond_task_scanning_engine():
                     
                 ACCUMULATED_SCANNER_USD = 0.0
                 
-            # Keep process running continuously at regular small intervals without bottlenecking
             await asyncio.sleep(0.5)
-            
         except Exception as e:
             print(f"⚠️ Scanner process cycle anomaly: {e}")
             await asyncio.sleep(2)
@@ -178,7 +165,6 @@ async def lifespan(app: FastAPI):
     database.init_db()
     loop = asyncio.get_event_loop()
     
-    # Initialize background run loops
     asyncio.ensure_future(loop.run_in_executor(None, sync_paystack_settlement_profile))
     asyncio.ensure_future(nanosecond_task_scanning_engine())
     
@@ -203,3 +189,14 @@ app = FastAPI(lifespan=lifespan)
 async def operations_web_dashboard(): 
     perf = database.get_comprehensive_performance_metrics()
     summary = perf.get("financial_summary", {})
+    matrix = perf.get("portfolio_matrix_breakdown", {})
+    infra = perf.get("infrastructure_telemetry", {})
+    
+    html = TemplateEngine.get_dashboard_html()
+    
+    html = html.replace("VAL_GROSS", f"₦{summary.get('gross_volume_processed_ngn', 0.0):,.2f}")
+    html = html.replace("VAL_POOL", f"₦{summary.get('active_matrix_allocation_pool_ngn', 0.0):,.2f}")
+    html = html.replace("VAL_DEPOSITS", f"{summary.get('total_successful_deposits', 0)} Transactions")
+    html = html.replace("VAL_M1", f"₦{matrix.get('PERSONAL_UPKEEP', 0.0):,.2f}")
+    html = html.replace("VAL_M2", f"₦{matrix.get('CRYPTO_ARBITRAGE', 0.0):,.2f}")
+    html = html.replace("VAL_M3", f"₦{matrix.get('FOREX_RESERVE', 0.0):,.2f}")
