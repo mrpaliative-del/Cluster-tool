@@ -1,36 +1,63 @@
-# Stage 1: Build the Java Engine using Maven
+
+# ---------------------------------------------------------
+# Stage 1: Build the Java engine
+# ---------------------------------------------------------
 FROM eclipse-temurin:17-jdk-alpine AS java-builder
+
 WORKDIR /build
+
 RUN apk add --no-cache maven
+
 COPY pom.xml ./
 COPY src/ ./src/
-RUN mvn clean package -DskipTests
 
-# Stage 2: Setup Python, Playwright, and Supervisor Runtime
+RUN mvn --batch-mode --no-transfer-progress clean package \
+    -DskipTests
+
+RUN test -f /build/target/engine.jar
+
+
+# ---------------------------------------------------------
+# Stage 2: Python, Java runtime, Playwright and Supervisor
+# ---------------------------------------------------------
 FROM python:3.10-slim-bookworm
 
-# Install system dependencies, Java runtime, and supervisor
-RUN apt-get update && apt-get install -y \
-    openjdk-17-jre-headless \
-    supervisor \
-    curl \
-    gnupg \
-    && rm -rf /var/lib/apt/lists/*
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=10000 \
+    HOST=0.0.0.0 \
+    LOG_LEVEL=INFO \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
 
-# Copy Python requirements and install dependencies
-COPY requirements.txt ./
-RUN pip install --upgrade pip setuptools wheel
-RUN pip install --no-cache-dir -r requirements.txt
-RUN playwright install --with-deps chromium
+# Install Java runtime and Supervisor.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        openjdk-17-jre-headless \
+        supervisor \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy application source code and configuration mappings
+# Install Python dependencies.
+COPY requirements.txt ./
+
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && python -m pip install --no-cache-dir -r requirements.txt
+
+# Install Chromium and the OS dependencies Playwright needs.
+RUN python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the application.
 COPY . .
-COPY --from=java-builder /build/target/*.jar ./engine.jar
-COPY supervisor.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Copy the exact JAR produced by the Maven build.
+COPY --from=java-builder /build/target/engine.jar /app/engine.jar
+
+# Use the actual configuration filename supplied in this repository.
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 EXPOSE 10000
 
-# Start command handed off directly to native OS supervisor process manager
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
