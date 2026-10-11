@@ -1,11 +1,19 @@
 
 """
-Free Arbitrage Mesh — API Supervisor
-Version: 2.1.0
+Free Arbitrage Mesh — Consolidated API Supervisor
+Version: 2.3.0
 
-Provides health, readiness, and configuration diagnostics.
-It does not claim that external feeds, scraping, or trading work
-merely because their processes have started.
+Combines:
+- FastAPI supervisor and lifecycle management
+- API health and readiness endpoints
+- Database and configuration diagnostics
+- Income Cascade validation
+
+Security:
+- No caller-supplied flag is accepted as proof of payment.
+- Income allocation remains disabled until a trusted server-side
+  payment-verification integration is implemented.
+- This application does not execute trades or transfer funds.
 """
 
 import logging
@@ -13,6 +21,8 @@ import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI
@@ -21,172 +31,351 @@ from fastapi.responses import JSONResponse
 import database
 
 
-# ---------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------
+# =========================================================
+# 1. CONFIGURATION
+# =========================================================
 
 HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "10000"))
+
+try:
+    PORT = int(os.getenv("PORT", "10000"))
+    if not 1 <= PORT <= 65535:
+        raise ValueError("PORT must be between 1 and 65535.")
+except ValueError:
+    PORT = 10000
+
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+if LOG_LEVEL not in logging._nameToLevel:
+    LOG_LEVEL = "INFO"
+
+SERVICE_NAME = "Free Arbitrage Mesh"
+SERVICE_VERSION = "2.3.0"
 
 STARTED_AT = time.monotonic()
 STARTED_AT_UTC = datetime.now(timezone.utc).isoformat()
 
+# Deliberately disabled until a trusted provider-side verifier
+# is implemented and connected to the database receipt function.
+INCOME_VERIFICATION_ENABLED = False
+
 logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    level=getattr(logging, LOG_LEVEL),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+
 logger = logging.getLogger("main_supervisor")
+income_logger = logging.getLogger("income-cascade")
 
 
-# ---------------------------------------------------------
-# Application lifecycle
-# ---------------------------------------------------------
+def utc_now() -> str:
+    """Return the current UTC timestamp in ISO 8601 format."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def get_uptime_seconds() -> float:
+    """Return process uptime in seconds."""
+    return round(time.monotonic() - STARTED_AT, 2)
+
+
+# =========================================================
+# 2. INCOME CASCADE
+# =========================================================
+
+def process_cascading_income(
+    task_id,
+    raw_payout,
+    source_platform,
+    *,
+    verified=False,
+    telegram_id=None,
+):
+    """
+    Validate an income event without recording unverified income.
+
+    IMPORTANT:
+    A boolean such as verified=True is not proof that a payment
+    was received. A trusted server-side payment-provider verifier
+    must be implemented before this function can allocate receipts.
+
+    Returns None when allocation is refused.
+    """
+
+    if verified is not True:
+        income_logger.warning(
+            "Rejected unverified income event: reference=%s",
+            task_id,
+        )
+        return None
+
+    reference = str(task_id or "").strip()
+    source = str(source_platform or "").strip()
+
+    if not reference or not source:
+        income_logger.error(
+            "Transaction reference and source platform are required."
+        )
+        return None
+
+    try:
+        amount = Decimal(str(raw_payout))
+
+        if not amount.is_finite() or amount <= Decimal("0"):
+            raise ValueError("Payout must be positive and finite.")
+
+        amount = amount.quantize(Decimal("0.01"))
+
+    except (InvalidOperation, TypeError, ValueError):
+        income_logger.warning(
+            "Rejected invalid payout amount for reference=%s",
+            reference,
+        )
+        return None
+
+    if telegram_id is None or not str(telegram_id).strip():
+        income_logger.warning(
+            "Missing owner identifier for reference=%s",
+            reference,
+        )
+        return None
+
+    # Fail closed: the previous database.py intentionally disables
+    # record_deposit(). Never replace this with a direct deposit write.
+    #
+    # Before enabling income allocation, implement a trusted server-side
+    # provider verifier that independently checks the transaction status,
+    # reference, amount, currency, fees, refunds and settlement details.
+    # That verifier must then call database.record_verified_receipt()
+    # using its actual supported arguments.
+    if not INCOME_VERIFICATION_ENABLED:
+        income_logger.error(
+            "Income allocation refused: trusted payment verification "
+            "is not configured. reference=%s source=%s amount=%s",
+            reference,
+            source,
+            amount,
+        )
+        return None
+
+    # No code path below this point is enabled until a trusted verifier
+    # has been integrated. Do not set the flag to True manually.
+    return None
+
+
+# =========================================================
+# 3. DATABASE CHECKS
+# =========================================================
+
+def check_database() -> tuple[bool, Optional[str]]:
+    """
+    Test basic SQLite connectivity.
+
+    Returns:
+        (True, None) on success.
+        (False, error_message) on failure.
+    """
+    try:
+        with database.get_connection() as connection:
+            connection.execute("SELECT 1").fetchone()
+
+        return True, None
+
+    except Exception as exc:
+        logger.exception("Database connectivity check failed.")
+        return False, str(exc)
+
+
+# =========================================================
+# 4. APPLICATION LIFECYCLE
+# =========================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Free Arbitrage Mesh API starting.")
+    logger.info(
+        "%s API starting; version=%s",
+        SERVICE_NAME,
+        SERVICE_VERSION,
+    )
 
     try:
         database.init_db()
-        logger.info("Application database initialized.")
+        logger.info("Database initialization completed.")
+
     except Exception:
         logger.exception("Database initialization failed.")
         raise
 
     yield
 
-    logger.info("Free Arbitrage Mesh API shutting down.")
+    logger.info("%s API shutting down.", SERVICE_NAME)
 
+
+# =========================================================
+# 5. FASTAPI APPLICATION
+# =========================================================
 
 app = FastAPI(
-    title="Free Arbitrage Mesh",
+    title=SERVICE_NAME,
     description=(
-        "API health and configuration diagnostics for the "
-        "Free Arbitrage Mesh monitoring system."
+        "API health, readiness and configuration diagnostics "
+        "for the Free Arbitrage Mesh monitoring system."
     ),
-    version="2.1.0",
+    version=SERVICE_VERSION,
     lifespan=lifespan,
 )
 
 
-# ---------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------
+# =========================================================
+# 6. ROOT ENDPOINT
+# =========================================================
 
 @app.get("/", tags=["system"])
 def root():
     return {
-        "service": "Free Arbitrage Mesh",
-        "version": "2.1.0",
+        "service": SERVICE_NAME,
+        "version": SERVICE_VERSION,
         "status": "online",
         "message": (
-            "Monitoring API is responding. External integrations "
-            "must be checked separately."
+            "The monitoring API is responding. External integrations "
+            "and worker processes must be checked separately."
         ),
-        "health_url": "/health",
-        "readiness_url": "/ready",
-        "diagnostics_url": "/api/system/status",
+        "endpoints": {
+            "health": "/health",
+            "readiness": "/ready",
+            "diagnostics": "/api/system/status",
+            "api_docs": "/docs",
+        },
     }
 
+
+# =========================================================
+# 7. LIVENESS ENDPOINT
+# =========================================================
 
 @app.get("/health", tags=["system"])
 def health():
     """
-    Liveness check: confirms the API can respond to a request.
-    It does not verify external providers or worker processes.
+    Liveness check.
+
+    Confirms that the API can respond. It does not establish that
+    the database, workers or external providers are operational.
     """
     return {
         "status": "ok",
         "service": "api",
-        "uptime_seconds": round(time.monotonic() - STARTED_AT, 2),
+        "version": SERVICE_VERSION,
+        "uptime_seconds": get_uptime_seconds(),
         "started_at": STARTED_AT_UTC,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": utc_now(),
     }
 
 
+# =========================================================
+# 8. READINESS ENDPOINT
+# =========================================================
+
 @app.get("/ready", tags=["system"])
 def readiness():
-    """Readiness check for the application's SQLite database."""
-    try:
-        with database.get_connection() as connection:
-            connection.execute("SELECT 1").fetchone()
+    """Check whether the API can access its SQLite database."""
 
-        return {
-            "status": "ready",
-            "database": "available",
-        }
+    database_available, _ = check_database()
 
-    except Exception:
-        logger.exception("Readiness check failed.")
-
+    if not database_available:
         return JSONResponse(
             status_code=503,
             content={
                 "status": "not_ready",
                 "database": "unavailable",
+                "timestamp": utc_now(),
             },
         )
 
+    return {
+        "status": "ready",
+        "database": "available",
+        "timestamp": utc_now(),
+    }
+
+
+# =========================================================
+# 9. SYSTEM DIAGNOSTICS
+# =========================================================
 
 @app.get("/api/system/status", tags=["system"])
 def system_status():
     """
-    Reports configuration presence, not integration success.
-    Never returns secret values.
+    Report API status and configuration presence.
+
+    Secret values are never returned. Configuration presence does
+    not prove that a provider connection or worker is functioning.
     """
-    try:
-        with database.get_connection() as connection:
-            connection.execute("SELECT 1").fetchone()
-        database_status = "available"
-    except Exception:
-        logger.exception("Database status check failed.")
-        database_status = "unavailable"
+
+    database_available, _ = check_database()
 
     telegram_configured = bool(
         os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
         and os.getenv("TELEGRAM_ADMIN_CHAT_ID", "").strip()
     )
 
+    task_feed_configured = bool(
+        os.getenv("TASK_FEED_URL", "").strip()
+    )
+
+    price_monitor_configured = bool(
+        os.getenv("MARKET_PAGE_URL", "").strip()
+        and os.getenv("PRICE_SELECTOR", "").strip()
+    )
+
     return {
-        "service": "Free Arbitrage Mesh",
-        "version": "2.1.0",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "uptime_seconds": round(time.monotonic() - STARTED_AT, 2),
+        "service": SERVICE_NAME,
+        "version": SERVICE_VERSION,
+        "timestamp": utc_now(),
+        "uptime_seconds": get_uptime_seconds(),
         "components": {
             "api": "responding",
-            "database": database_status,
+            "database": (
+                "available" if database_available else "unavailable"
+            ),
             "task_feed": (
                 "configured"
-                if os.getenv("TASK_FEED_URL", "").strip()
+                if task_feed_configured
                 else "not_configured"
             ),
             "price_monitor": (
                 "configured"
-                if (
-                    os.getenv("MARKET_PAGE_URL", "").strip()
-                    and os.getenv("PRICE_SELECTOR", "").strip()
-                )
+                if price_monitor_configured
                 else "not_configured"
             ),
             "telegram_alerts": (
-                "configured" if telegram_configured else "not_configured"
+                "configured"
+                if telegram_configured
+                else "not_configured"
             ),
             "java_engine": "simulation_only",
+            "income_cascade": (
+                "enabled"
+                if INCOME_VERIFICATION_ENABLED
+                else "disabled_pending_trusted_payment_verifier"
+            ),
             "live_trade_execution": "not_implemented",
+            "automated_fund_transfers": "not_implemented",
         },
         "notes": [
-            "Configuration does not prove provider connectivity.",
+            "Configuration presence does not prove provider connectivity.",
             "Task discovery is not verified income.",
+            "A verified receipt must be checked by a trusted server-side "
+            "payment-provider integration.",
+            "Ledger allocations do not represent real bank transfers.",
             "Price differences are indicative metrics, not realized profit.",
-            "No live trade execution is implemented.",
+            "The Java engine is simulation-only.",
+            "Live trade execution is not implemented.",
         ],
     }
 
 
-# ---------------------------------------------------------
-# Local entry point
-# ---------------------------------------------------------
+# =========================================================
+# 10. LOCAL ENTRY POINT
+# =========================================================
 
 if __name__ == "__main__":
     uvicorn.run(
