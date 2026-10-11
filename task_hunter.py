@@ -1,20 +1,38 @@
 
-import asyncio
+"""
+Free Arbitrage Mesh — Task Hunter
+Version: 2.1.0
+
+Purpose:
+- Discover tasks from one authorized HTTPS JSON feed.
+- Validate task records and HTTPS URLs.
+- Store discovered tasks in SQLite.
+- Send Telegram alerts for new tasks.
+- Retry failed notifications after a cooldown.
+- Log discovery and notification events.
+
+Important:
+Task discovery is not income. This module does not verify payments,
+record receipts, execute trades, or guarantee opportunities.
+"""
+
+from __future__ import annotations
+
 import json
 import logging
 import os
 import sqlite3
 import time
-from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
 
 
-# =========================================================
-# CONFIGURATION
-# =========================================================
+# ---------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------
 
 TASK_FEED_URL = os.getenv("TASK_FEED_URL", "").strip()
 TASK_FEED_TOKEN = os.getenv("TASK_FEED_TOKEN", "").strip()
@@ -22,207 +40,499 @@ TASK_FEED_TOKEN = os.getenv("TASK_FEED_TOKEN", "").strip()
 SCAN_INTERVAL_SECONDS = max(
     60, int(os.getenv("TASK_SCAN_INTERVAL_SECONDS", "900"))
 )
-REQUEST_TIMEOUT_SECONDS = 20
+REQUEST_TIMEOUT_SECONDS = max(
+    5, int(os.getenv("TASK_FEED_TIMEOUT_SECONDS", "20"))
+)
 
-STATE_DB_PATH = os.getenv(
-    "TASK_HUNTER_DB_PATH", "/tmp/task_hunter_state.sqlite3"
+DB_PATH = Path(
+    os.getenv("TASK_HUNTER_DB_PATH", "task_hunter_state.sqlite3")
+)
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_ADMIN_CHAT_ID = os.getenv("TELEGRAM_ADMIN_CHAT_ID", "").strip()
+
+NOTIFICATION_RETRY_SECONDS = max(
+    300, int(os.getenv("TASK_NOTIFICATION_RETRY_SECONDS", "900"))
 )
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(
-    level=LOG_LEVEL,
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-logger = logging.getLogger("task-hunter")
+logger = logging.getLogger("task_hunter")
 
 
-# =========================================================
-# LOCAL DISCOVERY STATE
-# This records task IDs, not income or payment balances.
-# =========================================================
+# ---------------------------------------------------------
+# Time and validation helpers
+# ---------------------------------------------------------
 
-def init_state_db():
-    Path(STATE_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
-    with sqlite3.connect(STATE_DB_PATH, timeout=15) as conn:
-        conn.execute("""
+
+def valid_https_url(value: str) -> bool:
+    """Accept HTTPS URLs with a hostname and no embedded credentials."""
+    if not isinstance(value, str) or len(value) > 4096:
+        return False
+
+    try:
+        parsed = urlparse(value.strip())
+        return (
+            parsed.scheme.lower() == "https"
+            and bool(parsed.hostname)
+            and parsed.username is None
+            and parsed.password is None
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def clean_text(value, limit: int = 2000) -> str:
+    if value is None:
+        return ""
+    return " ".join(str(value).split())[:limit]
+
+
+def validate_task(item) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+
+    task_id = clean_text(item.get("id") or item.get("task_id"), 200)
+    title = clean_text(item.get("title") or item.get("name"), 300)
+    url = clean_text(item.get("url") or item.get("link"), 4096)
+    source = clean_text(item.get("source") or "configured_feed", 150)
+    description = clean_text(item.get("description"), 2000)
+    deadline = clean_text(item.get("deadline"), 100)
+
+    if not task_id or not title or not valid_https_url(url):
+        return None
+
+    return {
+        "task_id": task_id,
+        "title": title,
+        "url": url,
+        "source": source,
+        "description": description,
+        "deadline": deadline,
+    }
+
+
+# ---------------------------------------------------------
+# SQLite storage
+# ---------------------------------------------------------
+
+def get_connection() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    connection = sqlite3.connect(
+        str(DB_PATH),
+        timeout=30,
+    )
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA busy_timeout = 30000")
+    return connection
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    table: str,
+    column: str,
+    definition: str,
+) -> None:
+    existing = {
+        row["name"]
+        for row in connection.execute(f"PRAGMA table_info({table})")
+    }
+
+    if column not in existing:
+        # Table and column names are fixed internal constants.
+        connection.execute(
+            f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+        )
+
+
+def init_db() -> None:
+    with get_connection() as connection:
+        connection.execute("""
             CREATE TABLE IF NOT EXISTS discovered_tasks (
                 task_id TEXT PRIMARY KEY,
-                source TEXT NOT NULL,
-                title TEXT NOT NULL,
-                url TEXT,
-                first_seen_at INTEGER NOT NULL
+                title TEXT NOT NULL DEFAULT '',
+                url TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                deadline TEXT NOT NULL DEFAULT '',
+                first_seen_at TEXT NOT NULL DEFAULT '',
+                last_seen_at TEXT NOT NULL DEFAULT '',
+                notification_status TEXT NOT NULL DEFAULT 'PENDING',
+                last_notification_attempt_at TEXT NOT NULL DEFAULT ''
             )
         """)
-        conn.commit()
+
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS task_hunter_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                task_id TEXT,
+                details TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        # Upgrade databases created by earlier versions.
+        columns = {
+            "title": "TEXT NOT NULL DEFAULT ''",
+            "url": "TEXT NOT NULL DEFAULT ''",
+            "source": "TEXT NOT NULL DEFAULT ''",
+            "description": "TEXT NOT NULL DEFAULT ''",
+            "deadline": "TEXT NOT NULL DEFAULT ''",
+            "first_seen_at": "TEXT NOT NULL DEFAULT ''",
+            "last_seen_at": "TEXT NOT NULL DEFAULT ''",
+            "notification_status": "TEXT NOT NULL DEFAULT 'PENDING'",
+            "last_notification_attempt_at": "TEXT NOT NULL DEFAULT ''",
+        }
+
+        for column, definition in columns.items():
+            _ensure_column(
+                connection, "discovered_tasks", column, definition
+            )
+
+        connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_task_notification_status
+            ON discovered_tasks(notification_status)
+        """)
+
+        connection.commit()
+
+    logger.info("Task Hunter database initialized at %s", DB_PATH)
 
 
-def record_new_task(task):
-    """Return True only when a task ID has not been recorded before."""
-    with sqlite3.connect(STATE_DB_PATH, timeout=15) as conn:
-        cursor = conn.execute(
+def record_event(
+    event_type: str,
+    task_id: str | None = None,
+    details: str = "",
+) -> None:
+    try:
+        with get_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO task_hunter_events
+                    (event_type, task_id, details, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    event_type[:100],
+                    task_id,
+                    details[:2000],
+                    utc_now(),
+                ),
+            )
+            connection.commit()
+    except sqlite3.Error:
+        logger.exception("Could not save Task Hunter event")
+
+
+def save_task(task: dict) -> bool:
+    """Save or update a task. Return True only for a newly discovered ID."""
+    now = utc_now()
+
+    with get_connection() as connection:
+        existing = connection.execute(
+            "SELECT task_id FROM discovered_tasks WHERE task_id = ?",
+            (task["task_id"],),
+        ).fetchone()
+
+        if existing:
+            connection.execute(
+                """
+                UPDATE discovered_tasks
+                SET title = ?, url = ?, source = ?, description = ?,
+                    deadline = ?, last_seen_at = ?
+                WHERE task_id = ?
+                """,
+                (
+                    task["title"],
+                    task["url"],
+                    task["source"],
+                    task["description"],
+                    task["deadline"],
+                    now,
+                    task["task_id"],
+                ),
+            )
+            connection.commit()
+            return False
+
+        connection.execute(
             """
-            INSERT OR IGNORE INTO discovered_tasks
-                (task_id, source, title, url, first_seen_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO discovered_tasks (
+                task_id, title, url, source, description, deadline,
+                first_seen_at, last_seen_at, notification_status,
+                last_notification_attempt_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', '')
             """,
             (
-                task["id"],
-                task["source"],
+                task["task_id"],
                 task["title"],
-                task.get("url"),
-                int(time.time()),
+                task["url"],
+                task["source"],
+                task["description"],
+                task["deadline"],
+                now,
+                now,
             ),
         )
-        conn.commit()
-        return cursor.rowcount == 1
+        connection.commit()
+
+    record_event("TASK_DISCOVERED", task["task_id"], task["title"])
+    return True
 
 
-# =========================================================
-# TASK FEED
-#
-# Configure TASK_FEED_URL to an authorized JSON endpoint.
-# Expected response:
-# {
-#   "tasks": [
-#     {
-#       "id": "unique-source-task-id",
-#       "title": "Task title",
-#       "url": "https://example.com/task",
-#       "source": "provider-name"
-#     }
-#   ]
-# }
-#
-# Discovery is not proof that a bounty is payable.
-# =========================================================
+# ---------------------------------------------------------
+# Feed integration
+# ---------------------------------------------------------
 
-def fetch_task_feed():
+def fetch_tasks() -> list[dict]:
     if not TASK_FEED_URL:
         logger.warning(
-            "TASK_FEED_URL is unset. No real task source is configured."
+            "TASK_FEED_URL is not configured; discovery is disabled."
         )
         return []
 
-    parsed = urlparse(TASK_FEED_URL)
+    if not valid_https_url(TASK_FEED_URL):
+        logger.error("TASK_FEED_URL must be a valid HTTPS URL.")
+        return []
 
-    if parsed.scheme != "https" or not parsed.netloc:
-        raise ValueError("TASK_FEED_URL must be a valid HTTPS URL.")
-
-    headers = {
-        "Accept": "application/json",
-        "User-Agent": "FreeArbitrageMesh-TaskHunter/1.0",
-    }
-
+    headers = {"Accept": "application/json"}
     if TASK_FEED_TOKEN:
         headers["Authorization"] = f"Bearer {TASK_FEED_TOKEN}"
 
-    response = requests.get(
-        TASK_FEED_URL,
-        headers=headers,
-        timeout=REQUEST_TIMEOUT_SECONDS,
+    try:
+        response = requests.get(
+            TASK_FEED_URL,
+            headers=headers,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+
+        # Avoid processing unexpectedly large responses.
+        if len(response.content) > 5_000_000:
+            raise ValueError("Feed response exceeds the 5 MB limit.")
+
+        payload = response.json()
+
+        if isinstance(payload, dict):
+            raw_tasks = payload.get("tasks", [])
+        elif isinstance(payload, list):
+            raw_tasks = payload
+        else:
+            raise ValueError("Feed must return a JSON list or a tasks list.")
+
+        if not isinstance(raw_tasks, list):
+            raise ValueError("'tasks' must be a JSON list.")
+
+        valid_tasks = []
+        rejected = 0
+
+        for item in raw_tasks:
+            task = validate_task(item)
+            if task:
+                valid_tasks.append(task)
+            else:
+                rejected += 1
+
+        if rejected:
+            logger.warning("Rejected %d invalid feed records.", rejected)
+
+        logger.info("Feed returned %d valid task records.", len(valid_tasks))
+        return valid_tasks
+
+    except (
+        requests.RequestException,
+        ValueError,
+        json.JSONDecodeError,
+    ):
+        logger.exception("Task feed request or parsing failed.")
+        record_event("FEED_ERROR", details="Request or JSON parsing failed")
+        return []
+
+
+# ---------------------------------------------------------
+# Telegram notifications
+# ---------------------------------------------------------
+
+def telegram_is_configured() -> bool:
+    return bool(TELEGRAM_BOT_TOKEN and TELEGRAM_ADMIN_CHAT_ID)
+
+
+def send_telegram(message: str) -> bool:
+    if not telegram_is_configured():
+        logger.info("Telegram is not configured; alert not sent.")
+        return False
+
+    endpoint = (
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     )
-    response.raise_for_status()
 
-    payload = response.json()
+    try:
+        response = requests.post(
+            endpoint,
+            json={
+                "chat_id": TELEGRAM_ADMIN_CHAT_ID,
+                "text": message[:4000],
+                "disable_web_page_preview": True,
+            },
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        result = response.json()
 
-    if not isinstance(payload, dict):
-        raise ValueError("Task feed response must be a JSON object.")
+        if not isinstance(result, dict) or not result.get("ok"):
+            logger.warning("Telegram did not confirm message delivery.")
+            return False
 
-    tasks = payload.get("tasks", [])
+        return True
 
-    if not isinstance(tasks, list):
-        raise ValueError("The 'tasks' field must be a list.")
-
-    normalized = []
-
-    for item in tasks:
-        if not isinstance(item, dict):
-            continue
-
-        task_id = str(item.get("id", "")).strip()
-        title = str(item.get("title", "")).strip()
-        source = str(item.get("source", "configured-feed")).strip()
-        url = str(item.get("url", "")).strip()
-
-        if not task_id or not title:
-            logger.warning("Ignoring task missing its ID or title.")
-            continue
-
-        if url:
-            parsed_task_url = urlparse(url)
-            if (
-                parsed_task_url.scheme != "https"
-                or not parsed_task_url.netloc
-            ):
-                logger.warning(
-                    "Ignoring task with an invalid URL: %s", task_id
-                )
-                continue
-
-        normalized.append({
-            "id": task_id,
-            "title": title[:300],
-            "source": source[:100],
-            "url": url or None,
-        })
-
-    return normalized
+    except (requests.RequestException, ValueError):
+        logger.exception("Telegram notification failed.")
+        return False
 
 
-# =========================================================
-# DISCOVERY CYCLE
-# =========================================================
+def task_notification_text(task: dict) -> str:
+    description = task.get("description") or "No description supplied."
+    deadline = task.get("deadline") or "Not supplied"
 
-async def scan_premium_enterprise_vectors():
-    logger.info("Enterprise task discovery worker starting.")
-    await asyncio.to_thread(init_state_db)
+    return (
+        "Free Arbitrage Mesh — Task Discovery\n\n"
+        f"Title: {task['title']}\n"
+        f"Source: {task['source']}\n"
+        f"Description: {description}\n"
+        f"Deadline: {deadline}\n"
+        f"Task link: {task['url']}\n\n"
+        "Check the provider's terms, eligibility, requirements, and "
+        "payment conditions before doing any work. Discovery is not income."
+    )
 
-    while True:
-        try:
-            tasks = await asyncio.to_thread(fetch_task_feed)
 
-            new_count = 0
+def notify_pending_tasks() -> None:
+    now = time.time()
 
-            for task in tasks:
-                is_new = await asyncio.to_thread(record_new_task, task)
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM discovered_tasks
+            WHERE notification_status IN ('PENDING', 'NOT_SENT')
+            ORDER BY first_seen_at ASC
+            LIMIT 50
+            """
+        ).fetchall()
 
-                if not is_new:
+    for row in rows:
+        last_attempt = row["last_notification_attempt_at"] or ""
+
+        if last_attempt:
+            try:
+                previous = datetime.fromisoformat(last_attempt).timestamp()
+                if now - previous < NOTIFICATION_RETRY_SECONDS:
                     continue
+            except ValueError:
+                pass
 
-                new_count += 1
+        task = dict(row)
+        attempted_at = utc_now()
 
+        with get_connection() as connection:
+            connection.execute(
+                """
+                UPDATE discovered_tasks
+                SET last_notification_attempt_at = ?
+                WHERE task_id = ?
+                """,
+                (attempted_at, task["task_id"]),
+            )
+            connection.commit()
+
+        sent = send_telegram(task_notification_text(task))
+        status = "SENT" if sent else "NOT_SENT"
+
+        with get_connection() as connection:
+            connection.execute(
+                """
+                UPDATE discovered_tasks
+                SET notification_status = ?
+                WHERE task_id = ?
+                """,
+                (status, task["task_id"]),
+            )
+            connection.commit()
+
+        record_event(
+            "NOTIFICATION_SENT" if sent else "NOTIFICATION_FAILED",
+            task["task_id"],
+            status,
+        )
+
+
+# ---------------------------------------------------------
+# Discovery cycle and worker
+# ---------------------------------------------------------
+
+def run_discovery_cycle() -> dict:
+    tasks = fetch_tasks()
+    newly_discovered = 0
+
+    for task in tasks:
+        try:
+            if save_task(task):
+                newly_discovered += 1
                 logger.info(
-                    "New task discovered | source=%s | id=%s | title=%s",
-                    task["source"],
-                    task["id"],
+                    "New task discovered: %s | %s",
                     task["title"],
+                    task["url"],
                 )
-
-                if task.get("url"):
-                    logger.info("Task details: %s", task["url"])
-
-            logger.info(
-                "Discovery cycle complete | received=%d | new=%d",
-                len(tasks),
-                new_count,
+        except sqlite3.Error:
+            logger.exception(
+                "Could not save task ID %s", task["task_id"]
+            )
+            record_event(
+                "TASK_SAVE_ERROR",
+                task["task_id"],
+                "Database write failed",
             )
 
-        except asyncio.CancelledError:
-            raise
+    notify_pending_tasks()
 
-        except (requests.RequestException, ValueError) as exc:
-            logger.warning("Task feed request or validation failed: %s", exc)
+    summary = {
+        "feed_records_valid": len(tasks),
+        "new_tasks": newly_discovered,
+        "checked_at": utc_now(),
+    }
+    logger.info("Discovery cycle complete: %s", summary)
+    return summary
 
+
+def main() -> None:
+    init_db()
+    logger.info(
+        "Task Hunter started. Scan interval: %s seconds.",
+        SCAN_INTERVAL_SECONDS,
+    )
+
+    while True:
+        started = time.monotonic()
+
+        try:
+            run_discovery_cycle()
         except Exception:
-            logger.exception("Unexpected task discovery failure.")
+            logger.exception("Unexpected discovery-cycle failure.")
+            record_event("CYCLE_ERROR", details="Unexpected worker error")
 
-        await asyncio.sleep(SCAN_INTERVAL_SECONDS)
+        elapsed = time.monotonic() - started
+        time.sleep(max(1, SCAN_INTERVAL_SECONDS - int(elapsed)))
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(scan_premium_enterprise_vectors())
-    except KeyboardInterrupt:
-        logger.info("Task hunter stopped.")
+    main()
