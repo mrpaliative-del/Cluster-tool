@@ -1,19 +1,18 @@
 
 """
-Free Arbitrage Mesh
-Main FastAPI application and service health endpoints.
+Free Arbitrage Mesh — API Supervisor
+Version: 2.1.0
 
-This file runs the web application.
-Supervisor separately manages the Java engine, scraper, and task hunter.
-Health checks do not imply that trades or earnings have occurred.
+Provides health, readiness, and configuration diagnostics.
+It does not claim that external feeds, scraping, or trading work
+merely because their processes have started.
 """
-
-from __future__ import annotations
 
 import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import uvicorn
 from fastapi import FastAPI
@@ -22,90 +21,100 @@ from fastapi.responses import JSONResponse
 import database
 
 
-APP_NAME = "Free Arbitrage Mesh"
-APP_VERSION = "1.0.0"
+# ---------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------
 
-PORT = int(os.getenv("PORT", "10000"))
 HOST = os.getenv("HOST", "0.0.0.0")
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").lower()
+PORT = int(os.getenv("PORT", "10000"))
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-STARTED_AT = time.time()
+STARTED_AT = time.monotonic()
+STARTED_AT_UTC = datetime.now(timezone.utc).isoformat()
 
 logging.basicConfig(
-    level=LOG_LEVEL.upper(),
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+logger = logging.getLogger("main_supervisor")
 
-logger = logging.getLogger("free-arbitrage-mesh")
 
+# ---------------------------------------------------------
+# Application lifecycle
+# ---------------------------------------------------------
 
 @asynccontextmanager
-async def lifespan(application: FastAPI):
-    """Initialize shared database tables when the web service starts."""
-    logger.info("Starting %s.", APP_NAME)
+async def lifespan(app: FastAPI):
+    logger.info("Free Arbitrage Mesh API starting.")
 
     try:
         database.init_db()
-        logger.info("Database initialization completed.")
+        logger.info("Application database initialized.")
     except Exception:
         logger.exception("Database initialization failed.")
         raise
 
     yield
 
-    logger.info("Stopping %s.", APP_NAME)
+    logger.info("Free Arbitrage Mesh API shutting down.")
 
 
 app = FastAPI(
-    title=APP_NAME,
-    version=APP_VERSION,
+    title="Free Arbitrage Mesh",
     description=(
-        "Opportunity discovery and internal ledger service. "
-        "Discovery estimates are not verified income."
+        "API health and configuration diagnostics for the "
+        "Free Arbitrage Mesh monitoring system."
     ),
+    version="2.1.0",
     lifespan=lifespan,
 )
 
 
-@app.get("/", tags=["General"])
-async def root():
+# ---------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------
+
+@app.get("/", tags=["system"])
+def root():
     return {
-        "service": APP_NAME,
-        "version": APP_VERSION,
-        "message": "Service endpoint is available.",
-        "health_endpoint": "/health",
-        "readiness_endpoint": "/ready",
+        "service": "Free Arbitrage Mesh",
+        "version": "2.1.0",
+        "status": "online",
+        "message": (
+            "Monitoring API is responding. External integrations "
+            "must be checked separately."
+        ),
+        "health_url": "/health",
+        "readiness_url": "/ready",
+        "diagnostics_url": "/api/system/status",
     }
 
 
-@app.get("/health", tags=["Health"])
-async def health():
+@app.get("/health", tags=["system"])
+def health():
     """
-    Lightweight process health check.
-
-    This endpoint confirms that FastAPI can answer requests.
-    It does not confirm database, market-feed, or worker health.
+    Liveness check: confirms the API can respond to a request.
+    It does not verify external providers or worker processes.
     """
     return {
-        "service": APP_NAME,
         "status": "ok",
-        "uptime_seconds": int(time.time() - STARTED_AT),
-        "timestamp": int(time.time()),
+        "service": "api",
+        "uptime_seconds": round(time.monotonic() - STARTED_AT, 2),
+        "started_at": STARTED_AT_UTC,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
-@app.get("/ready", tags=["Health"])
-async def readiness():
-    """Check whether the web service can access its database."""
+@app.get("/ready", tags=["system"])
+def readiness():
+    """Readiness check for the application's SQLite database."""
     try:
         with database.get_connection() as connection:
             connection.execute("SELECT 1").fetchone()
 
         return {
-            "service": APP_NAME,
-            "ready": True,
-            "database": "reachable",
-            "timestamp": int(time.time()),
+            "status": "ready",
+            "database": "available",
         }
 
     except Exception:
@@ -114,48 +123,76 @@ async def readiness():
         return JSONResponse(
             status_code=503,
             content={
-                "service": APP_NAME,
-                "ready": False,
+                "status": "not_ready",
                 "database": "unavailable",
-                "timestamp": int(time.time()),
             },
         )
 
 
-@app.get("/api/system/status", tags=["System"])
-async def system_status():
+@app.get("/api/system/status", tags=["system"])
+def system_status():
     """
-    Report basic application status without exposing secrets,
-    settlement-account information, or fabricated performance metrics.
+    Reports configuration presence, not integration success.
+    Never returns secret values.
     """
-    database_status = "available"
-
     try:
         with database.get_connection() as connection:
             connection.execute("SELECT 1").fetchone()
+        database_status = "available"
     except Exception:
+        logger.exception("Database status check failed.")
         database_status = "unavailable"
 
+    telegram_configured = bool(
+        os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        and os.getenv("TELEGRAM_ADMIN_CHAT_ID", "").strip()
+    )
+
     return {
-        "service": APP_NAME,
-        "version": APP_VERSION,
-        "web_service": "running",
-        "database": database_status,
-        "task_feed_configured": bool(
-            os.getenv("TASK_FEED_URL", "").strip()
-        ),
-        "market_page_configured": bool(
-            os.getenv("MARKET_PAGE_URL", "").strip()
-        ),
-        "timestamp": int(time.time()),
+        "service": "Free Arbitrage Mesh",
+        "version": "2.1.0",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "uptime_seconds": round(time.monotonic() - STARTED_AT, 2),
+        "components": {
+            "api": "responding",
+            "database": database_status,
+            "task_feed": (
+                "configured"
+                if os.getenv("TASK_FEED_URL", "").strip()
+                else "not_configured"
+            ),
+            "price_monitor": (
+                "configured"
+                if (
+                    os.getenv("MARKET_PAGE_URL", "").strip()
+                    and os.getenv("PRICE_SELECTOR", "").strip()
+                )
+                else "not_configured"
+            ),
+            "telegram_alerts": (
+                "configured" if telegram_configured else "not_configured"
+            ),
+            "java_engine": "simulation_only",
+            "live_trade_execution": "not_implemented",
+        },
+        "notes": [
+            "Configuration does not prove provider connectivity.",
+            "Task discovery is not verified income.",
+            "Price differences are indicative metrics, not realized profit.",
+            "No live trade execution is implemented.",
+        ],
     }
 
+
+# ---------------------------------------------------------
+# Local entry point
+# ---------------------------------------------------------
 
 if __name__ == "__main__":
     uvicorn.run(
         app,
         host=HOST,
         port=PORT,
-        log_level=LOG_LEVEL,
+        log_level=LOG_LEVEL.lower(),
         access_log=True,
     )
