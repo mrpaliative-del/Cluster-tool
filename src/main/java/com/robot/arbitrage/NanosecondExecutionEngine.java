@@ -1,32 +1,87 @@
+
 package com.robot.arbitrage;
 
-import sun.misc.Unsafe;
-import java.lang.reflect.Field;
+import java.math.BigInteger;
 
-public class NanosecondExecutionEngine {
-    private static Unsafe unsafe;
-    private static long baseMemoryAddress;
+/**
+ * Free Arbitrage Mesh — Signal Evaluation Engine
+ *
+ * Evaluates a price difference using safe Java arithmetic.
+ * This class does not submit orders, access exchanges, or guarantee profit.
+ */
+public final class NanosecondExecutionEngine {
 
-    static {
-        try {
-            Field field = Unsafe.class.getDeclaredField("theUnsafe");
-            field.setAccessible(true);
-            unsafe = (Unsafe) field.get(null);
-            baseMemoryAddress = unsafe.allocateMemory(32); // Preallocate GC-free space block
-        } catch (Exception e) {
-            System.out.println("Fallback to JVM standard primitives.");
-        }
+    private static final long DEFAULT_THRESHOLD_MINOR_UNITS = 500L;
+
+    private NanosecondExecutionEngine() {
+        // Utility class.
     }
 
-    public static boolean evaluateAndLockPrice(long rawInboundPrice, long calculatedFairValue) {
-        if (unsafe == null) {
-            return (calculatedFairValue - rawInboundPrice) > 500L;
-        }
-        // Write metrics directly to off-heap memory bytes, ensuring zero GC footprints
-        unsafe.putLong(baseMemoryAddress + 0, rawInboundPrice);
-        unsafe.putLong(baseMemoryAddress + 8, calculatedFairValue);
+    /**
+     * Returns true when the calculated fair value exceeds the inbound
+     * price by more than the configured threshold.
+     *
+     * All values must use the same currency and unit, such as kobo.
+     */
+    public static boolean evaluateSignal(
+            long inboundPrice,
+            long calculatedFairValue
+    ) {
+        return evaluateSignal(
+                inboundPrice,
+                calculatedFairValue,
+                configuredThreshold()
+        );
+    }
 
-        long differential = unsafe.getLong(baseMemoryAddress + 8) - unsafe.getLong(baseMemoryAddress + 0);
-        return differential > 500L; // Fires execution if the spread yields greater than N5.00 margin
+    /**
+     * Explicit-threshold overload, useful for testing.
+     */
+    public static boolean evaluateSignal(
+            long inboundPrice,
+            long calculatedFairValue,
+            long threshold
+    ) {
+        if (inboundPrice < 0 || calculatedFairValue < 0) {
+            throw new IllegalArgumentException(
+                    "Prices must not be negative."
+            );
+        }
+
+        if (threshold < 0) {
+            throw new IllegalArgumentException(
+                    "Threshold must not be negative."
+            );
+        }
+
+        BigInteger difference = BigInteger.valueOf(calculatedFairValue)
+                .subtract(BigInteger.valueOf(inboundPrice));
+
+        return difference.compareTo(BigInteger.valueOf(threshold)) > 0;
+    }
+
+    private static long configuredThreshold() {
+        String configured = System.getenv("PRICE_SIGNAL_THRESHOLD_MINOR");
+
+        if (configured == null || configured.isBlank()) {
+            return DEFAULT_THRESHOLD_MINOR_UNITS;
+        }
+
+        try {
+            long threshold = Long.parseLong(configured.trim());
+
+            if (threshold < 0) {
+                throw new IllegalArgumentException(
+                        "PRICE_SIGNAL_THRESHOLD_MINOR must not be negative."
+                );
+            }
+
+            return threshold;
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(
+                    "PRICE_SIGNAL_THRESHOLD_MINOR must be a valid integer.",
+                    exception
+            );
+        }
     }
 }
