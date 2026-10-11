@@ -27,6 +27,86 @@ bot = telebot.TeleBot(TOKEN, threaded=False)
 ALERT_COUNTER = 0
 LAST_ALERT_TIME = "N/A"
 
+
+class TemplateEngine:
+    @staticmethod
+    def get_dashboard_html() -> str:
+        return """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mpee Global Ventures - Matrix Ops Board</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 16px; margin-bottom: 24px; }
+        h1, h2 { margin: 0; color: #38bdf8; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 24px; }
+        .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        .card-title { font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 8px; }
+        .card-value { font-size: 28px; font-weight: bold; color: #f1f5f9; }
+        .matrix-list { list-style: none; padding: 0; margin: 0; }
+        .matrix-item { display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding: 10px 0; font-size: 14px; }
+        .matrix-item:last-child { border: none; }
+        .status-badge { background: #10b981; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>Mpee Global Ventures</h1>
+                <div style="color: #94a3b8; font-size: 14px; margin-top: 4px;">Automated Allocation Matrix Ops Control Center</div>
+            </div>
+            <span class="status-badge">ENGINE ONLINE</span>
+        </div>
+        
+        <h2>📊 Operational Financial Performance</h2>
+        <div class="grid" style="margin-top: 12px;">
+            <div class="card">
+                <div class="card-title">Gross Volume Processed</div>
+                <div class="card-value">VAL_GROSS</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Active Matrix Liquidity Pool</div>
+                <div class="card-value">VAL_POOL</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Successful Deposits</div>
+                <div class="card-value">VAL_DEPOSITS</div>
+            </div>
+        </div>
+
+        <div class="grid" style="grid-template-columns: 2fr 1fr;">
+            <div class="card">
+                <h2>🗂️ Asset Class Allocation Balances</h2>
+                <div class="matrix-list" style="margin-top: 12px;">
+                    <div class="matrix-item"><span>💳 Personal Upkeep (20%)</span><strong>VAL_M1</strong></div>
+                    <div class="matrix-item"><span>🤖 Crypto Arbitrage Core (20%)</span><strong>VAL_M2</strong></div>
+                    <div class="matrix-item"><span>💱 Forex Allocation Vault (20%)</span><strong>VAL_M3</strong></div>
+                    <div class="matrix-item"><span>📈 Stocks & Equities (15%)</span><strong>VAL_M4</strong></div>
+                    <div class="matrix-item"><span>✨ Commodities & Gold (10%)</span><strong>VAL_M5</strong></div>
+                    <div class="matrix-item"><span>📊 Alternative Markets (10%)</span><strong>VAL_M6</strong></div>
+                    <div class="matrix-item"><span>⚽ Sports Betting Vault (5%)</span><strong>VAL_M7</strong></div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>⚡ System Telemetry</h2>
+                <div class="matrix-list" style="margin-top: 12px;">
+                    <div class="matrix-item"><span>Database Node</span><span style="color: #10b981; font-weight: bold;">VAL_DB</span></div>
+                    <div class="matrix-item"><span>Paystack Profile Sync</span><span style="color: #38bdf8; font-weight: bold;">VAL_SYNC</span></div>
+                    <div class="matrix-item"><span>TV Alerts Executed</span><strong>VAL_COUNT</strong></div>
+                    <div class="matrix-item"><span>Last Signal Frame</span><span style="font-family: monospace; font-size: 12px;">VAL_TIME</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>"""
+
+
 def sync_paystack_settlement_profile():
     """Queries Paystack Business metrics profile parameters to cache local settlement metadata."""
     secret_key = os.getenv("PAYSTACK_SECRET_KEY", "sk_live_xxxx").strip()
@@ -43,19 +123,15 @@ def sync_paystack_settlement_profile():
     except Exception as e:
         print(f"⚠️ Automated bank settlement profile sync error: {e}")
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Seed core data sets
     database.init_db()
-    
-    # Process webhook integration metrics concurrently in background executor
     loop = asyncio.get_event_loop()
     asyncio.ensure_future(loop.run_in_executor(None, sync_paystack_settlement_profile))
-    
     await asyncio.sleep(2)
     webhook_url = f"{RENDER_URL}/tg-backend-intake"
     print(f"🌐 Linking Webhook Pipeline to: {webhook_url}")
-    
     for attempt in range(1, 6):
         try:
             bot.remove_webhook()
@@ -68,7 +144,9 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(attempt * 3)
     yield
 
+
 app = FastAPI(lifespan=lifespan)
+
 
 @app.get("/", response_class=HTMLResponse)
 async def operations_web_dashboard(): 
@@ -78,115 +156,40 @@ async def operations_web_dashboard():
     matrix = perf.get("portfolio_matrix_breakdown", {})
     infra = perf.get("infrastructure_telemetry", {})
     
-    # Format specific metrics beforehand to keep HTML block raw and stable
-    gross_vol = f"₦{summary.get('gross_volume_processed_ngn', 0.0):,.2f}"
-    matrix_pool = f"₦{summary.get('active_matrix_allocation_pool_ngn', 0.0):,.2f}"
-    deposit_count = f"{summary.get('total_successful_deposits', 0)} Transactions"
+    html = TemplateEngine.get_dashboard_html()
     
-    p_upkeep = f"₦{matrix.get('PERSONAL_UPKEEP', 0.0):,.2f}"
-    c_crypto = f"₦{matrix.get('CRYPTO_ARBITRAGE', 0.0):,.2f}"
-    f_reserve = f"₦{matrix.get('FOREX_RESERVE', 0.0):,.2f}"
-    s_equities = f"₦{matrix.get('STOCKS_EQUITIES', 0.0):,.2f}"
-    c_gold = f"₦{matrix.get('COMMODITIES_GOLD', 0.0):,.2f}"
-    a_markets = f"₦{matrix.get('ALT_MARKETS', 0.0):,.2f}"
-    s_betting = f"₦{matrix.get('SPORTS_BETTING', 0.0):,.2f}"
+    html = html.replace("VAL_GROSS", f"₦{summary.get('gross_volume_processed_ngn', 0.0):,.2f}")
+    html = html.replace("VAL_POOL", f"₦{summary.get('active_matrix_allocation_pool_ngn', 0.0):,.2f}")
+    html = html.replace("VAL_DEPOSITS", f"{summary.get('total_successful_deposits', 0)} Transactions")
+    html = html.replace("VAL_M1", f"₦{matrix.get('PERSONAL_UPKEEP', 0.0):,.2f}")
+    html = html.replace("VAL_M2", f"₦{matrix.get('CRYPTO_ARBITRAGE', 0.0):,.2f}")
+    html = html.replace("VAL_M3", f"₦{matrix.get('FOREX_RESERVE', 0.0):,.2f}")
+    html = html.replace("VAL_M4", f"₦{matrix.get('STOCKS_EQUITIES', 0.0):,.2f}")
+    html = html.replace("VAL_M5", f"₦{matrix.get('COMMODITIES_GOLD', 0.0):,.2f}")
+    html = html.replace("VAL_M6", f"₦{matrix.get('ALT_MARKETS', 0.0):,.2f}")
+    html = html.replace("VAL_M7", f"₦{matrix.get('SPORTS_BETTING', 0.0):,.2f}")
+    html = html.replace("VAL_DB", str(infra.get('database_health', 'OFFLINE')))
+    html = html.replace("VAL_SYNC", str(infra.get('storage_sync_state', 'PENDING')))
+    html = html.replace("VAL_COUNT", str(ALERT_COUNTER))
+    html = html.replace("VAL_TIME", str(LAST_ALERT_TIME))
     
-    db_status = str(infra.get('database_health', 'OFFLINE'))
-    sync_status = str(infra.get('storage_sync_state', 'PENDING'))
+    return HTMLResponse(content=html, status_code=200)
 
-    html_content = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Mpee Global Ventures - Matrix Ops Board</title>
-        <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
-            .container { max-width: 1200px; margin: 0 auto; }
-            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 16px; margin-bottom: 24px; }
-            h1, h2 { margin: 0; color: #38bdf8; }
-            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 24px; }
-            .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-            .card-title { font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 8px; }
-            .card-value { font-size: 28px; font-weight: bold; color: #f1f5f9; }
-            .matrix-list { list-style: none; padding: 0; margin: 0; }
-            .matrix-item { display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding: 10px 0; font-size: 14px; }
-            .matrix-item:last-child { border: none; }
-            .status-badge { background: #10b981; color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <div>
-                    <h1>Mpee Global Ventures</h1>
-                    <div style="color: #94a3b8; font-size: 14px; margin-top: 4px;">Automated Allocation Matrix Ops Control Center</div>
-                </div>
-                <span class="status-badge">ENGINE ONLINE</span>
-            </div>
-            
-            <h2>📊 Operational Financial Performance</h2>
-            <div class="grid" style="margin-top: 12px;">
-                <div class="card">
-                    <div class="card-title">Gross Volume Processed</div>
-                    <div class="card-value">VAL_GROSS</div>
-                </div>
-                <div class="card">
-                    <div class="card-title">Active Matrix Liquidity Pool</div>
-                    <div class="card-value">VAL_POOL</div>
-                </div>
-                <div class="card">
-                    <div class="card-title">Successful Deposits</div>
-                    <div class="card-value">VAL_DEPOSITS</div>
-                </div>
-            </div>
-
-            <div class="grid" style="grid-template-columns: 2fr 1fr;">
-                <div class="card">
-                    <h2>🗂️ Asset Class Allocation Balances</h2>
-                    <div class="matrix-list" style="margin-top: 12px;">
-                        <div class="matrix-item"><span>💳 Personal Upkeep (20%)</span><strong>VAL_M1</strong></div>
-                        <div class="matrix-item"><span>🤖 Crypto Arbitrage Core (20%)</span><strong>VAL_M2</strong></div>
-                        <div class="matrix-item"><span>💱 Forex Allocation Vault (20%)</span><strong>VAL_M3</strong></div>
-                        <div class="matrix-item"><span>📈 Stocks & Equities (15%)</span><strong>VAL_M4</strong></div>
-                        <div class="matrix-item"><span>✨ Commodities & Gold (10%)</span><strong>VAL_M5</strong></div>
-                        <div class="matrix-item"><span>📊 Alternative Markets (10%)</span><strong>VAL_M6</strong></div>
-                        <div class="matrix-item"><span>⚽ Sports Betting Vault (5%)</span><strong>VAL_M7</strong></div>
-                    </div>
-                </div>
-                
-                <div class="card">
-                    <h2>⚡ System Telemetry</h2>
-                    <div class="matrix-list" style="margin-top: 12px;">
-                        <div class="matrix-item"><span>Database Node</span><span style="color: #10b981; font-weight: bold;">VAL_DB</span></div>
-                        <div class="matrix-item"><span>Paystack Profile Sync</span><span style="color: #38bdf8; font-weight: bold;">VAL_SYNC</span></div>
-                        <div class="matrix-item"><span>TV Alerts Executed</span><strong>VAL_COUNT</strong></div>
-                        <div class="matrix-item"><span>Last Signal Frame</span><span style="font-family: monospace; font-size: 12px;">VAL_TIME</span></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </body>
-    </html>
-    """.replace("VAL_GROSS", gross_vol).replace("VAL_POOL", matrix_pool).replace("VAL_DEPOSITS", deposit_count)\
-       .replace("VAL_M1", p_upkeep).replace("VAL_M2", c_crypto).replace("VAL_M3", f_reserve)\
-       .replace("VAL_M4", s_equities).replace("VAL_M5", c_gold).replace("VAL_M6", a_markets).replace("VAL_M7", s_betting)\
-       .replace("VAL_DB", db_status).replace("VAL_SYNC", sync_status).replace("VAL_COUNT", str(ALERT_COUNTER)).replace("VAL_TIME", LAST_ALERT_TIME)
-
-    return HTMLResponse(content=html_content, status_code=200)
 
 @app.head("/")
 async def home_mesh_head():
     return Response(status_code=200)
 
+
 @app.get("/health")
 def engine_health_check(): 
     return {"status": "ok"}
 
+
 @app.get("/portfolio-status")
 def get_portfolio_status():
     return database.get_comprehensive_performance_metrics()
+
 
 @app.post("/tradingview-alert")
 async def tradingview_alert_receiver(request: Request):
@@ -194,3 +197,15 @@ async def tradingview_alert_receiver(request: Request):
     try:
         payload = await request.json()
         action = payload.get("action")
+        ticker = payload.get("ticker")
+        price = payload.get("close_price")
+        
+        ALERT_COUNTER += 1
+        LAST_ALERT_TIME = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+        
+        balances = database.get_ledger_metrics()
+        fx_capital = balances.get("FOREX_RESERVE", 0.0)
+        if fx_capital <= 0:
+            return {"status": "ignored", "reason": "zero_capital"}
+            
+        if BROKER_TOKEN == "mock_secure_token_xxxx":
